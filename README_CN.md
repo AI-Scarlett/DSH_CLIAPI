@@ -12,6 +12,47 @@ DSH_CLIAPI 是专门给 DeepSeek Harness 使用的本地授权与模型调度插
 
 Cursor 是模型客户端，不是 CLIProxyAPI 的 OAuth 提供方。它可以连接本机 OpenAI 兼容地址，但此版本不导入 Cursor 账号授权。
 
+## 一条命令安装
+
+适用于已经使用 DeepSeek Harness 的 macOS 和 Linux。需要 Node.js 20+、`curl` 和 `tar`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.4.0/install.sh | bash
+```
+
+安装器会自动完成：
+
+1. 识别 macOS / Linux 与 Intel / Apple Silicon / ARM64；
+2. 下载官方 CLIProxyAPI `v7.2.132` 并核对上游 SHA-256；
+3. 生成两枚不同的本机随机密钥，配置文件权限设为 `600`，认证目录设为 `700`；
+4. 把 DSH_CLIAPI 注册成 Harness `web` profile 的标准 bundle；
+5. 保留已有 OAuth 账号、Auto 配置和 CLIProxyAPI 配置，升级前自动备份旧插件；
+6. 输出并尝试打开授权面板：
+
+   ```text
+   http://127.0.0.1:3080/dsh-cliapi
+   ```
+
+如果 Harness 已经在运行但尚未加载新 bundle，安装器不会强行结束用户进程，而是提示重启一次：
+
+```bash
+npx @deepseek-ai/dsh --profile web
+```
+
+不希望安装器启动 Harness 或打开浏览器时：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.4.0/install.sh | bash -s -- --no-start --no-open
+```
+
+不习惯直接执行网络脚本，可以先下载审阅：
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.4.0/install.sh
+less install.sh
+bash install.sh
+```
+
 ## 首次使用与提供方目录
 
 安装并启动后，Harness 首页右下角会固定显示 `DSH_CLIAPI` 入口。面板顶部提供不会自动隐藏的三步向导：
@@ -71,6 +112,7 @@ provider 和模型名以你自己的 Harness 面板实际显示为准，不需�
 ## 文件
 
 - `plugin/`：DeepSeek Harness Cordis Host 插件与控制面板。
+- `install.sh`：macOS / Linux 一键安装、升级、上游校验与 WebUI 启动入口。
 - `config/cordis.patch.entry.yml`：profile 插件条目模板。
 - `config/cliproxyapi.example.yaml`：CLIProxyAPI 回环配置模板。
 - `config/settings.routes.example.yaml`：Harness 模型路由和默认 Auto 示例。
@@ -78,35 +120,34 @@ provider 和模型名以你自己的 Harness 面板实际显示为准，不需�
 - `verify.sh`：面板状态与 Auto 实际调用验证。
 - `test/auto-failover.mjs`：无需真实账号的 Harness、CLIProxyAPI 与自定义 API 混合故障切换测试。
 
-## 安装概要
+## 手动安装
+
+一般用户不需要执行下面这些步骤；它们只用于自定义目录、离线部署或排查安装器。
 
 1. 先把官方 `cli-proxy-api` 二进制放到 `$DSH_HOME/cliproxyapi/bin/cli-proxy-api`。
 2. 将 `plugin/` 复制到 `$DSH_HOME/plugins/dsh-cliapi/`。
-3. 在目标 profile 的 `package.json` 中加入：
+3. 在目标 profile 的 `package.json` 中加入依赖并把 `@local/dsh-cliapi` 加入 `dsh.profile.bundles`：
 
    ```json
    "@local/dsh-cliapi": "link:/绝对路径/.dsh/plugins/dsh-cliapi"
    ```
 
-4. 将 `config/cordis.patch.entry.yml` 的条目合并进 profile 的 `cordis.patch.yml`。
-5. 生成两个不同的本机随机值，分别替换所有 `CHANGE_ME_LOCAL_API_KEY` 和 `CHANGE_ME_LOCAL_MANAGEMENT_KEY`；同名值必须在模板之间保持一致。
-6. 将 `config/cliproxyapi.example.yaml` 调整绝对 `auth-dir` 后保存为 `$DSH_HOME/cliproxyapi/config.yaml`，权限设为 `600`，认证目录权限设为 `700`。
-7. 把 API key 以 `CLIPROXY_API_KEY` 写入 Harness 的受管凭据文件，并按需合并 `config/settings.routes.example.yaml` 中的 CLIProxyAPI 路由。Auto 本身由插件原生注册，不要再手工添加 `dsh-cliapi-auto` HTTP provider。
-8. 在 profile 目录运行 `pnpm install --offline --ignore-scripts`，然后重启 Harness。
-9. 打开 `http://127.0.0.1:3080/dsh-cliapi`。面板会同时列出 Harness 现有 API 模型和 CLIProxyAPI 模型，可直接配置 Auto 顺序。
+4. 让 profile 的 `node_modules/@local/dsh-cliapi` 指向插件目录。官方 `dsh plugin --profile web add ...` 可自动完成依赖和 bundle 注册。
+5. 生成两个不同的本机随机值，保存到 `$DSH_HOME/cliproxyapi/plugin-secrets.json`，字段为 `apiKey` 和 `managementKey`，权限设为 `600`。
+6. 将 `config/cliproxyapi.example.yaml` 调整绝对 `auth-dir` 后保存为 `$DSH_HOME/cliproxyapi/config.yaml`，并确保其中两枚密钥与 `plugin-secrets.json` 一致。
+7. 重启 Harness，打开 `http://127.0.0.1:3080/dsh-cliapi`。插件会自动创建 CLIProxyAPI 模型路由，不需要再手工编辑 Harness 的模型列表。
 
 如果已有 `cordis.patch.yml` 或 `settings.yaml`，必须按键合并，不能整文件覆盖。安装前应先备份。
 
 ### 从 0.3.x 升级
 
-直接替换插件目录并重启 Harness。0.4 会自动把旧的字符串候选（例如 `"grok-4.6"`）迁移为 `provider + model` 对象，并删除旧的 `llm-pi-ai.providers.dsh-cliapi-auto` HTTP 路由；其他 provider 和默认模型设置不会被覆盖。建议升级前仍备份 `$DSH_HOME/cliproxyapi/dsh-cliapi.json` 与 Harness `settings.yaml`。
+重新执行“一条命令安装”即可。安装器会备份旧插件并保留已有 CLIProxyAPI 配置与 OAuth 认证目录。0.4 会自动把旧的字符串候选（例如 `"grok-4.6"`）迁移为 `provider + model` 对象，并删除旧的 `llm-pi-ai.providers.dsh-cliapi-auto` HTTP 路由；其他 provider 和默认模型设置不会被覆盖。
 
 ## 验证
 
-需要 `curl` 与 `jq`：
+需要 `curl`、`jq` 和已运行的 DSH_CLIAPI。安装器生成的本机 API key 会自动读取，不会打印到终端：
 
 ```bash
-export DSH_CLIAPI_API_KEY='你的本机 API key'
 ./verify.sh
 ```
 

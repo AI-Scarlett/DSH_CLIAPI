@@ -1,0 +1,6 @@
+# Installed automatically by `dsh plugin --profile web add ...`.
+# Runtime paths and local secrets default to $DSH_HOME/cliproxyapi.
+- insert:
+    - id: dsh-cliapi
+      name: '@local/dsh-cliapi'
+      config: {}

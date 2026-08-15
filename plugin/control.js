@@ -11,6 +11,7 @@ const MAX_PROXY_BYTES = 24 * 1024 * 1024
 const AUTO_PROVIDER = 'dsh-cliapi-auto-native'
 const LEGACY_AUTO_PROVIDER = 'dsh-cliapi-auto'
 const AUTO_MODEL = 'auto'
+export const PROXY_CREDENTIAL_REF = 'DSH_CLIAPI_PROXY_API_KEY'
 const RETRYABLE_STATUS = new Set([400, 401, 403, 404, 408, 409, 422, 425, 429, 500, 502, 503, 504])
 const OAUTH_ENDPOINTS = Object.freeze({
   codex: 'codex-auth-url',
@@ -398,17 +399,29 @@ export async function registerControlPlane(ctx, options) {
       const existing = current?.providers?.[provider]
       if (existing !== undefined) {
         const declared = Array.isArray(existing.models) ? existing.models : []
-        if (requiredModel === undefined || declared.some(model => model?.id === requiredModel)) return
-        const addition = providerModels.find(model => model.id === requiredModel)
-        if (addition === undefined) throw new Error(`${route.displayName} model ${requiredModel} is not available yet`)
-        await ctx.settings.update('llm-pi-ai', { providers: { [provider]: { models: [...declared, addition] } } })
+        let nextModels = declared
+        if (requiredModel !== undefined && !declared.some(model => model?.id === requiredModel)) {
+          const addition = providerModels.find(model => model.id === requiredModel)
+          if (addition === undefined) throw new Error(`${route.displayName} model ${requiredModel} is not available yet`)
+          nextModels = [...declared, addition]
+        }
+        if (existing.apiKeyEnv !== PROXY_CREDENTIAL_REF || nextModels !== declared) {
+          await ctx.settings.update('llm-pi-ai', {
+            providers: {
+              [provider]: {
+                apiKeyEnv: PROXY_CREDENTIAL_REF,
+                ...(nextModels === declared ? {} : { models: nextModels }),
+              },
+            },
+          })
+        }
         return
       }
       await ctx.settings.update('llm-pi-ai', {
         providers: {
           [provider]: {
             displayName: route.displayName,
-            apiKeyEnv: 'CLIPROXY_API_KEY',
+            apiKeyEnv: PROXY_CREDENTIAL_REF,
             api: route.api,
             baseURL: upstreamBase,
             models: providerModels,

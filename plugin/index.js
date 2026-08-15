@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { access } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import { connect } from 'node:net'
-import { dirname } from 'node:path'
-import { registerControlPlane } from './control.js'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { PROXY_CREDENTIAL_REF, registerControlPlane } from './control.js'
 
 export const name = 'dsh-cliapi'
-export const inject = ['webServer', 'agentDefaultModel', 'settings', 'llm']
+export const inject = ['webServer', 'agentDefaultModel', 'settings', 'llm', 'credentials']
 
 const MAX_DIAGNOSTIC_BYTES = 16 * 1024
 const NATIVE_AUTO_PROVIDER = 'dsh-cliapi-auto-native'
@@ -18,6 +19,35 @@ function requireText(config, key) {
     throw new TypeError(`dsh-cliapi: config.${key} must be a non-empty string`)
   }
   return value
+}
+
+function optionalText(config, key, fallback) {
+  const value = config?.[key] ?? fallback
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new TypeError(`dsh-cliapi: config.${key} must be a non-empty string`)
+  }
+  return value.trim()
+}
+
+async function resolveRuntimeConfig(config) {
+  const dshHome = optionalText(config, 'dshHome', process.env.DSH_HOME ?? join(homedir(), '.dsh'))
+  const executable = optionalText(config, 'executable', join(dshHome, 'cliproxyapi', 'bin', 'cli-proxy-api'))
+  const configPath = optionalText(config, 'configPath', join(dshHome, 'cliproxyapi', 'config.yaml'))
+  const autoConfigPath = optionalText(config, 'autoConfigPath', join(dshHome, 'cliproxyapi', 'dsh-cliapi.json'))
+  const secretsPath = optionalText(config, 'secretsPath', join(dshHome, 'cliproxyapi', 'plugin-secrets.json'))
+  let apiKey = typeof config?.apiKey === 'string' ? config.apiKey.trim() : ''
+  let managementKey = typeof config?.managementKey === 'string' ? config.managementKey.trim() : ''
+  if (apiKey === '' || managementKey === '') {
+    let secrets
+    try {
+      secrets = JSON.parse(await readFile(secretsPath, 'utf8'))
+    } catch (error) {
+      throw new Error(`dsh-cliapi: cannot read ${secretsPath}; run the official installer again (${String(error)})`)
+    }
+    if (apiKey === '') apiKey = requireText(secrets, 'apiKey')
+    if (managementKey === '') managementKey = requireText(secrets, 'managementKey')
+  }
+  return { executable, configPath, autoConfigPath, apiKey, managementKey }
 }
 
 function positiveInteger(config, key, fallback) {
@@ -71,11 +101,6 @@ async function stopProcess(child, timeoutMs) {
 }
 
 export function apply(ctx, config = {}) {
-  const executable = requireText(config, 'executable')
-  const configPath = requireText(config, 'configPath')
-  const apiKey = requireText(config, 'apiKey')
-  const managementKey = requireText(config, 'managementKey')
-  const autoConfigPath = requireText(config, 'autoConfigPath')
   const host = config.host ?? '127.0.0.1'
   if (host !== '127.0.0.1' && host !== 'localhost') {
     throw new TypeError('dsh-cliapi: config.host must be a loopback host')
@@ -119,6 +144,7 @@ export function apply(ctx, config = {}) {
   }, 'dsh-cliapi.provider-priority')
 
   ctx.effect(async () => {
+    const { executable, configPath, autoConfigPath, apiKey, managementKey } = await resolveRuntimeConfig(config)
     await Promise.all([access(executable), access(configPath)])
     if (await canConnect(host, port)) {
       throw new Error(`dsh-cliapi: ${host}:${String(port)} is already in use`)
@@ -146,6 +172,10 @@ export function apply(ctx, config = {}) {
 
     let disposeControlPlane
     try {
+      // llm-pi-ai resolves named credentials through Harness on every request;
+      // writing through the official service keeps the proxy key durable,
+      // owner-only, hot-reloadable, and separate from the plugin manifest.
+      await ctx.credentials.set(PROXY_CREDENTIAL_REF, apiKey)
       disposeControlPlane = await registerControlPlane(ctx, {
         host,
         port,
@@ -161,8 +191,11 @@ export function apply(ctx, config = {}) {
     ctx.logger.info('DSH_CLIAPI ready at http://%s:%d/dsh-cliapi', ctx.webServer.host, ctx.webServer.port)
 
     return async () => {
-      await disposeControlPlane()
-      await stopProcess(child, shutdownTimeoutMs)
+      try {
+        await disposeControlPlane()
+      } finally {
+        await stopProcess(child, shutdownTimeoutMs)
+      }
       ctx.logger.info('DSH_CLIAPI stopped')
     }
   }, 'dsh-cliapi.runtime')

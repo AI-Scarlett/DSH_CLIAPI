@@ -2,7 +2,7 @@ llm-pi-ai:
   providers:
     cliproxy-codex:
       displayName: DSH_CLIAPI · Codex
-      apiKeyEnv: CLIPROXY_API_KEY
+      apiKeyEnv: DSH_CLIAPI_PROXY_API_KEY
       api: openai-responses
       baseURL: http://127.0.0.1:8317/v1
       models:
@@ -10,7 +10,7 @@ llm-pi-ai:
           name: GPT-5.6 Luna
     cliproxy-grok:
       displayName: DSH_CLIAPI · Grok
-      apiKeyEnv: CLIPROXY_API_KEY
+      apiKeyEnv: DSH_CLIAPI_PROXY_API_KEY
       api: openai-completions
       baseURL: http://127.0.0.1:8317/v1
       models:

@@ -1,21 +1,6 @@
-# DSH_CLIAPI owns the CLIProxyAPI child process and exposes a loopback-only
-# authorization/default-model/Auto control plane to the DeepSeek Harness UI.
+# Optional manual entry. The one-command installer registers plugin/cordis.patch.yml
+# as a standard Harness bundle, so normal installations do not merge this file.
 - insert:
     - id: dsh-cliapi
       name: '@local/dsh-cliapi'
-      config:
-        executable: !!js dshHomePath('cliproxyapi/bin/cli-proxy-api')
-        configPath: !!js dshHomePath('cliproxyapi/config.yaml')
-        autoConfigPath: !!js dshHomePath('cliproxyapi/dsh-cliapi.json')
-        host: 127.0.0.1
-        port: 8317
-        apiKey: CHANGE_ME_LOCAL_API_KEY
-        managementKey: CHANGE_ME_LOCAL_MANAGEMENT_KEY
-        defaultAutoCandidates:
-          - provider: deepseek-official
-            model: deepseek-v4-flash
-          - provider: cliproxy-grok
-            model: grok-4.6
-        preferredProvider: dsh-cliapi-auto-native
-        startupTimeoutMs: 15000
-        shutdownTimeoutMs: 5000
+      config: {}

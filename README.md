@@ -1,6 +1,7 @@
 # DSH_CLIAPI
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/AI-Scarlett/DSH_CLIAPI)](https://github.com/AI-Scarlett/DSH_CLIAPI/releases/latest)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness-5b5bd6)](https://github.com/deepseek-ai/DeepSeek-Harness)
 [![CLIProxyAPI](https://img.shields.io/badge/CLIProxyAPI-v7.2.132-16a085)](https://github.com/router-for-me/CLIProxyAPI)
 
@@ -9,6 +10,22 @@
 DSH_CLIAPI 负责随 Harness 启停官方 CLIProxyAPI，并在 Harness 内提供一个本机控制面板。用户不需要在终端里逐个执行 OAuth 命令，就能完成账号连接、默认模型设置和 Auto 候选顺序配置。
 
 > 本项目是社区插件，并非 DeepSeek 或 CLIProxyAPI 官方项目。源码包不包含 CLIProxyAPI 二进制。
+
+## 一条命令安装
+
+已经使用 DeepSeek Harness 的 macOS / Linux 用户，直接执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.4.0/install.sh | bash
+```
+
+安装器会下载并校验官方 CLIProxyAPI、生成本机随机密钥、注册 Harness 插件，最后输出并尝试打开：
+
+```text
+http://127.0.0.1:3080/dsh-cliapi
+```
+
+再次执行同一命令即可升级。OAuth 账号、Auto 顺序和已有 CLIProxyAPI 配置会保留。完整行为、脚本审阅方法和手动安装说明见 [中文文档](README_CN.md)。
 
 ## 功能
 
@@ -33,9 +50,11 @@ DSH_CLIAPI 负责随 Harness 启停官方 CLIProxyAPI，并在 Harness 内提供
 
 Gemini AI Studio API Key、Vertex 服务账号和自定义 OpenAI 兼容上游属于凭据或配置接入，不属于本版本的 CLI/OAuth 按钮。
 
-## 快速开始
+## 安装后配置
 
-完整安装、配置、安全边界和验证方法见 [中文文档](README_CN.md)。安装完成并启动 Harness 后：
+如果 Harness 正在运行旧配置，安装器会提示重启一次。
+
+安装并启动 Harness 后：
 
 1. 点击 Harness 首页右下角的 `DSH_CLIAPI`；
 2. 使用 Harness 已配置的 API 模型，或连接至少一个 CLI/OAuth 账号；
@@ -49,7 +68,6 @@ Auto 候选按 `provider + model` 保存，面板会分别标注“Harness 已�
 ## 验证
 
 ```bash
-export DSH_CLIAPI_API_KEY='你的本机 API key'
 ./verify.sh
 ```
 
