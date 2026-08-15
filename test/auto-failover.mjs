@@ -1,111 +1,81 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { createServer } from 'node:http'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { registerControlPlane } from '../plugin/control.js'
+import { createAutoAdapter } from '../plugin/control.js'
 
-const apiKey = 'test-loopback-key'
-const upstream = createServer(async (req, res) => {
-  if (req.url === '/v1/models') {
-    res.setHeader('content-type', 'application/json')
-    res.end(JSON.stringify({ data: [
-      { id: 'gpt-bad-model', owned_by: 'openai' },
-      { id: 'gpt-good-model', owned_by: 'openai' },
-    ] }))
-    return
-  }
-  if (req.url === '/v1/chat/completions') {
-    const chunks = []
-    for await (const chunk of req) chunks.push(chunk)
-    const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-    res.setHeader('content-type', 'application/json')
-    if (body.model === 'gpt-bad-model') {
-      res.statusCode = 503
-      res.end(JSON.stringify({ error: { message: 'simulated provider outage' } }))
-      return
-    }
-    res.end(JSON.stringify({ model: body.model, choices: [{ message: { role: 'assistant', content: 'FALLBACK_OK' } }] }))
-    return
-  }
-  if (req.url === '/v0/management/auth-files') {
-    res.setHeader('content-type', 'application/json')
-    res.end('{"files":[]}')
-    return
-  }
-  res.statusCode = 404
-  res.end()
-})
-await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve))
-const upstreamPort = upstream.address().port
+const calls = []
+let lastDispatch = null
+const candidates = [
+  { provider: 'deepseek-official', model: 'deepseek-chat' },
+  { provider: 'cliproxy-grok', model: 'grok-4.6' },
+  { provider: 'minimax-custom', model: 'MiniMax-M2.5' },
+]
 
-const routes = []
-const webServer = {
-  host: '127.0.0.1',
-  port: 0,
-  register(route) {
-    routes.push(route)
-    return () => routes.splice(routes.indexOf(route), 1)
-  },
-  tapIndex() { return () => {} },
-}
-const harness = createServer((req, res) => {
-  const pathname = new URL(req.url ?? '/', 'http://localhost').pathname
-  const route = routes.filter(row => pathname === row.path || pathname.startsWith(`${row.path}/`))
-    .sort((a, b) => b.path.length - a.path.length)[0]
-  if (route === undefined) {
-    res.statusCode = 404
-    res.end()
-    return
-  }
-  Promise.resolve(route.handler(req, res)).catch(error => {
-    res.statusCode = 500
-    res.end(String(error))
-  })
-})
-await new Promise(resolve => harness.listen(0, '127.0.0.1', resolve))
-webServer.port = harness.address().port
-
-const temp = await mkdtemp(join(tmpdir(), 'dsh-cliapi-test-'))
 const ctx = {
-  webServer,
-  logger: { info() {}, warn() {} },
-  settings: {
-    get: () => ({ providers: { 'cliproxy-codex': { models: [{ id: 'gpt-bad-model' }, { id: 'gpt-good-model' }] } } }),
-    update: async () => {},
-  },
-  agentDefaultModel: {
-    currentSelection: () => ({ provider: 'dsh-cliapi-auto', model: 'auto' }),
-    saveSelection: async () => {},
+  logger: { warn() {} },
+  llm: {
+    async resolveModelInfo(provider, model) {
+      return {
+        provider,
+        id: model,
+        context: { contextWindow: provider === 'minimax-custom' ? 204_800 : 128_000 },
+        defaultMaxTokens: provider === 'minimax-custom' ? 32_768 : 8_192,
+      }
+    },
+    async * stream(options) {
+      calls.push({
+        provider: options.provider,
+        model: options.model,
+        reasoningEffort: options.reasoningEffort,
+      })
+      if (options.provider === 'deepseek-official') {
+        yield {
+          type: 'finish',
+          reason: { kind: 'error', failure: { code: 'RATE_LIMITED', message: 'simulated limit' } },
+        }
+        return
+      }
+      if (options.provider === 'cliproxy-grok') {
+        const error = new Error('simulated transport failure')
+        error.code = 'TRANSPORT_ERROR'
+        throw error
+      }
+      yield { type: 'text-delta', index: 0, text: 'HARNESS_AUTO_OK' }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    },
   },
 }
 
-let dispose
-try {
-  dispose = await registerControlPlane(ctx, {
-    host: '127.0.0.1',
-    port: upstreamPort,
-    apiKey,
-    managementKey: 'test-management-key',
-    autoConfigPath: join(temp, 'auto.json'),
-    defaultAutoCandidates: ['gpt-bad-model', 'gpt-good-model'],
-  })
-  const response = await fetch(`http://127.0.0.1:${String(webServer.port)}/dsh-cliapi/v1/chat/completions`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'auto', messages: [{ role: 'user', content: 'test' }], stream: false }),
-  })
-  assert.equal(response.status, 200)
-  assert.equal(response.headers.get('x-dsh-cliapi-model'), 'gpt-good-model')
-  assert.equal(response.headers.get('x-dsh-cliapi-attempts'), '2')
-  const body = await response.json()
-  assert.equal(body.choices[0].message.content, 'FALLBACK_OK')
-  console.log('AUTO_FAILOVER_OK')
-} finally {
-  await dispose?.()
-  await Promise.all([
-    new Promise(resolve => harness.close(resolve)),
-    new Promise(resolve => upstream.close(resolve)),
-  ])
-  await rm(temp, { recursive: true, force: true })
+const state = {
+  cooldowns: new Map(),
+  getConfig: () => ({ enabled: true, candidates, cooldownSeconds: 60 }),
+  setLastDispatch: value => { lastDispatch = value },
 }
+const adapter = createAutoAdapter(ctx, state)
+
+const model = await adapter.resolveModel('dsh-cliapi-auto-native', 'auto')
+assert.equal(model.context.contextWindow, 128_000)
+assert.equal(model.defaultMaxTokens, 8_192)
+
+const chunks = []
+for await (const chunk of adapter.stream({
+  provider: 'dsh-cliapi-auto-native',
+  model: 'auto',
+  messages: [{ role: 'user', content: 'test' }],
+  reasoningEffort: 'high',
+})) {
+  chunks.push(chunk)
+}
+
+assert.deepEqual(calls, [
+  { provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: 'high' },
+  { provider: 'cliproxy-grok', model: 'grok-4.6', reasoningEffort: 'high' },
+  { provider: 'minimax-custom', model: 'MiniMax-M2.5', reasoningEffort: 'high' },
+])
+assert.equal(chunks[0].type, 'text-delta')
+assert.equal(chunks[0].text, 'HARNESS_AUTO_OK')
+assert.equal(chunks.at(-1).reason.kind, 'stop')
+assert.equal(lastDispatch.provider, 'minimax-custom')
+assert.equal(lastDispatch.model, 'MiniMax-M2.5')
+assert.equal(lastDispatch.attempts, 3)
+assert.equal(state.cooldowns.size, 2)
+
+console.log('HARNESS_AUTO_FAILOVER_OK')

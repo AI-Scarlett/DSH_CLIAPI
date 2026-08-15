@@ -1,8 +1,14 @@
 {
   "enabled": true,
   "candidates": [
-    "grok-4.6",
-    "gpt-5.6-luna"
+    {
+      "provider": "deepseek-official",
+      "model": "deepseek-v4-flash"
+    },
+    {
+      "provider": "cliproxy-grok",
+      "model": "grok-4.6"
+    }
   ],
   "cooldownSeconds": 60
 }

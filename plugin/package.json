@@ -1,11 +1,20 @@
 {
   "name": "@local/dsh-cliapi",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "DSH_CLIAPI authorization center and automatic local model router for DeepSeek Harness",
   "private": true,
   "type": "module",
   "main": "./index.js",
-  "exports": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "engines": {
     "node": ">=20"
   }
