@@ -8,7 +8,8 @@ const API_PATH = `${PANEL_PATH}/api`
 const PROXY_PATH = `${PANEL_PATH}/v1`
 const MAX_JSON_BYTES = 32 * 1024
 const MAX_PROXY_BYTES = 24 * 1024 * 1024
-const AUTO_PROVIDER = 'dsh-cliapi-auto'
+const AUTO_PROVIDER = 'dsh-cliapi-auto-native'
+const LEGACY_AUTO_PROVIDER = 'dsh-cliapi-auto'
 const AUTO_MODEL = 'auto'
 const RETRYABLE_STATUS = new Set([400, 401, 403, 404, 408, 409, 422, 425, 429, 500, 502, 503, 504])
 const OAUTH_ENDPOINTS = Object.freeze({
@@ -150,16 +151,146 @@ function sanitizeModels(payload) {
   return models.sort((a, b) => a.provider.localeCompare(b.provider) || a.id.localeCompare(b.id))
 }
 
+function normalizeCandidate(value) {
+  if (typeof value === 'string') {
+    const model = value.trim()
+    const provider = routeForModel(model)
+    return model === '' || provider === '' ? null : { provider, model }
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
+  const provider = typeof value.provider === 'string' ? value.provider.trim() : ''
+  const model = typeof value.model === 'string' ? value.model.trim() : ''
+  if (provider === '' || model === '' || provider === AUTO_PROVIDER || provider === LEGACY_AUTO_PROVIDER) return null
+  return { provider, model }
+}
+
+function candidateKey(candidate) {
+  return `${candidate.provider}\u0000${candidate.model}`
+}
+
 function normalizeAutoConfig(value, defaults) {
-  const candidates = Array.isArray(value?.candidates)
-    ? [...new Set(value.candidates.filter(item => typeof item === 'string').map(item => item.trim()).filter(Boolean))].slice(0, 8)
-    : defaults
+  const source = Array.isArray(value?.candidates) ? value.candidates : defaults
+  const candidates = []
+  const seen = new Set()
+  for (const raw of source) {
+    const candidate = normalizeCandidate(raw)
+    if (candidate === null) continue
+    const key = candidateKey(candidate)
+    if (seen.has(key)) continue
+    seen.add(key)
+    candidates.push(candidate)
+    if (candidates.length === 12) break
+  }
   return {
     enabled: value?.enabled !== false,
     candidates,
     cooldownSeconds: Number.isSafeInteger(value?.cooldownSeconds)
       ? Math.min(600, Math.max(5, value.cooldownSeconds))
       : 60,
+  }
+}
+
+function commitsCandidate(chunk) {
+  return chunk?.type === 'text-delta'
+    || chunk?.type === 'reasoning-delta'
+    || chunk?.type === 'tool-call-delta'
+    || chunk?.type === 'block-end'
+}
+
+/** Build the native Harness Auto adapter. Exported for the failover test. */
+export function createAutoAdapter(ctx, state) {
+  return {
+    providerInfo(provider) {
+      return { id: provider, name: 'DSH_CLIAPI · Auto' }
+    },
+    providerRetryPolicy() {
+      return undefined
+    },
+    listModels(provider) {
+      return Promise.resolve([{
+        provider,
+        id: AUTO_MODEL,
+        name: 'Auto · Harness + CLIProxyAPI',
+        description: '按候选顺序在 Harness 与 CLIProxyAPI 模型之间自动故障切换',
+      }])
+    },
+    async resolveModel(provider, model, signal) {
+      const contexts = []
+      const outputCaps = []
+      for (const candidate of state.getConfig().candidates) {
+        if (signal?.aborted) break
+        try {
+          const info = await ctx.llm.resolveModelInfo(candidate.provider, candidate.model, signal)
+          if (info.context?.contextWindow !== undefined) contexts.push(info.context.contextWindow)
+          if (info.defaultMaxTokens !== undefined) outputCaps.push(info.defaultMaxTokens)
+        } catch {
+          // One stale candidate must not hide Auto from the selector. Dispatch
+          // will record and skip it if the user actually invokes Auto.
+        }
+      }
+      return {
+        provider,
+        id: model,
+        name: 'Auto · Harness + CLIProxyAPI',
+        description: '按候选顺序在 Harness 与 CLIProxyAPI 模型之间自动故障切换',
+        ...(contexts.length === 0 ? {} : { context: { contextWindow: Math.min(...contexts) } }),
+        ...(outputCaps.length === 0 ? {} : { defaultMaxTokens: Math.min(...outputCaps) }),
+      }
+    },
+    async * stream(options) {
+      const config = state.getConfig()
+      if (!config.enabled || config.candidates.length === 0) {
+        yield { type: 'finish', reason: { kind: 'error', failure: { code: 'AUTO_DISABLED', message: 'DSH_CLIAPI Auto is disabled or has no candidates' } } }
+        return
+      }
+      const now = Date.now()
+      const ready = config.candidates.filter(candidate => (state.cooldowns.get(candidateKey(candidate)) ?? 0) <= now)
+      const candidates = ready.length > 0 ? ready : config.candidates
+      const failures = []
+      for (const candidate of candidates) {
+        if (options.signal?.aborted) {
+          yield { type: 'finish', reason: { kind: 'aborted', failure: { code: 'ABORTED', message: 'DSH_CLIAPI Auto was aborted' } } }
+          return
+        }
+        const pending = []
+        let committed = false
+        let failed = null
+        try {
+          for await (const chunk of ctx.llm.stream({ ...options, provider: candidate.provider, model: candidate.model })) {
+            if (!committed && chunk.type === 'finish' && (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted')) {
+              if (chunk.reason.kind === 'aborted' && options.signal?.aborted) {
+                yield chunk
+                return
+              }
+              failed = chunk.reason.failure
+              break
+            }
+            if (!committed) {
+              pending.push(chunk)
+              if (commitsCandidate(chunk) || chunk.type === 'finish') {
+                committed = true
+                state.setLastDispatch({ ...candidate, at: new Date().toISOString(), attempts: failures.length + 1 })
+                yield* pending
+              }
+            } else {
+              yield chunk
+            }
+          }
+        } catch (error) {
+          failed = {
+            code: typeof error?.code === 'string' ? error.code : 'PROVIDER_ERROR',
+            message: error instanceof Error ? error.message : String(error),
+          }
+        }
+        if (committed) return
+        const failure = failed ?? { code: 'EMPTY_RESPONSE', message: 'candidate ended without a terminal response' }
+        failures.push({ ...candidate, failure })
+        state.cooldowns.set(candidateKey(candidate), Date.now() + config.cooldownSeconds * 1000)
+      }
+      const summary = failures.map(item => `${item.provider}/${item.model} (${item.failure.code})`).join(', ')
+      ctx.logger.warn('DSH_CLIAPI Auto exhausted Harness candidates: %s', summary)
+      yield { type: 'finish', reason: { kind: 'error', failure: { code: 'AUTO_EXHAUSTED', message: `Auto candidates failed: ${summary}` } } }
+    },
   }
 }
 
@@ -205,36 +336,55 @@ async function pipeWebBody(upstream, res) {
 export async function registerControlPlane(ctx, options) {
   const upstreamBase = `http://${options.host}:${String(options.port)}`
   const managementBase = `${upstreamBase}/v0/management`
-  const defaults = [...new Set(options.defaultAutoCandidates)].slice(0, 8)
+  const defaults = normalizeAutoConfig({ candidates: options.defaultAutoCandidates }, []).candidates
   let dashboardHtml = await readFile(DASHBOARD_FILE, 'utf8')
   let autoConfig
+  let storedAutoConfig
   try {
-    autoConfig = normalizeAutoConfig(JSON.parse(await readFile(options.autoConfigPath, 'utf8')), defaults)
+    storedAutoConfig = JSON.parse(await readFile(options.autoConfigPath, 'utf8'))
+    autoConfig = normalizeAutoConfig(storedAutoConfig, defaults)
   } catch (error) {
     if (error?.code !== 'ENOENT') ctx.logger.warn(error)
     autoConfig = normalizeAutoConfig(undefined, defaults)
+  }
+  if (JSON.stringify(storedAutoConfig) !== JSON.stringify(autoConfig)) {
     await writeAutoConfig(options.autoConfigPath, autoConfig)
   }
   const cooldowns = new Map()
   let lastDispatch = null
 
-  const ensureProviderRoute = async (provider, models) => {
-    const current = ctx.settings.get('llm-pi-ai')
-    if (current?.providers?.[provider] !== undefined) return
-    if (provider === AUTO_PROVIDER) {
-      await ctx.settings.update('llm-pi-ai', {
-        providers: {
-          [AUTO_PROVIDER]: {
-            displayName: 'DSH_CLIAPI · Auto',
-            apiKeyEnv: 'CLIPROXY_API_KEY',
-            api: 'openai-completions',
-            baseURL: `http://${ctx.webServer.host}:${String(ctx.webServer.port)}${PROXY_PATH}`,
-            models: [{ id: AUTO_MODEL, name: 'Auto · 自动故障切换', contextWindow: 200000, maxTokens: 32768 }],
-          },
-        },
-      })
-      return
+  const autoState = {
+    cooldowns,
+    getConfig: () => autoConfig,
+    setLastDispatch: value => { lastDispatch = value },
+  }
+  const disposeAutoAdapter = ctx.llm.registerAdapter([AUTO_PROVIDER], createAutoAdapter(ctx, autoState))
+
+  // v0.3 represented Auto as an llm-pi-ai HTTP route. The settings namespace
+  // can register after this inserted plugin, so migrate in the background.
+  // A distinct native route prevents either startup order from colliding.
+  let stopLegacyMigration = false
+  const legacyMigration = (async () => {
+    for (let attempt = 0; attempt < 300 && !stopLegacyMigration; attempt += 1) {
+      const piSettings = ctx.settings.get('llm-pi-ai')
+      if (piSettings !== undefined) {
+        if (piSettings?.providers?.[LEGACY_AUTO_PROVIDER] !== undefined) {
+          await ctx.settings.mutate('llm-pi-ai', [{ op: 'unset', path: ['providers', LEGACY_AUTO_PROVIDER] }])
+        }
+        break
+      }
+      await new Promise(resolve => setTimeout(resolve, 100))
     }
+    const selection = ctx.agentDefaultModel.currentSelection()
+    if (selection.provider === LEGACY_AUTO_PROVIDER && selection.model === AUTO_MODEL) {
+      await ctx.agentDefaultModel.saveSelection({ provider: AUTO_PROVIDER, model: AUTO_MODEL })
+    }
+  })().catch(error => {
+    ctx.logger.warn('DSH_CLIAPI could not migrate the v0.3 Auto route: %s', error instanceof Error ? error.message : String(error))
+  })
+
+  const ensureProviderRoute = async (provider, models, requiredModel) => {
+    const current = ctx.settings.get('llm-pi-ai')
     const route = {
       'cliproxy-claude': { displayName: 'DSH_CLIAPI · Claude', api: 'anthropic-messages' },
       'cliproxy-antigravity': { displayName: 'DSH_CLIAPI · Antigravity', api: 'openai-completions' },
@@ -245,6 +395,15 @@ export async function registerControlPlane(ctx, options) {
     if (route !== undefined) {
       const providerModels = models.filter(entry => entry.provider === provider).map(entry => ({ id: entry.id, name: entry.name }))
       if (providerModels.length === 0) throw new Error(`${route.displayName} models are not available yet`)
+      const existing = current?.providers?.[provider]
+      if (existing !== undefined) {
+        const declared = Array.isArray(existing.models) ? existing.models : []
+        if (requiredModel === undefined || declared.some(model => model?.id === requiredModel)) return
+        const addition = providerModels.find(model => model.id === requiredModel)
+        if (addition === undefined) throw new Error(`${route.displayName} model ${requiredModel} is not available yet`)
+        await ctx.settings.update('llm-pi-ai', { providers: { [provider]: { models: [...declared, addition] } } })
+        return
+      }
       await ctx.settings.update('llm-pi-ai', {
         providers: {
           [provider]: {
@@ -280,12 +439,56 @@ export async function registerControlPlane(ctx, options) {
     }
   }
 
-  const listModels = async () => {
+  const listCLIProxyModels = async () => {
     const response = await fetch(`${upstreamBase}/v1/models`, {
       headers: { authorization: `Bearer ${options.apiKey}`, accept: 'application/json' },
     })
-    const models = sanitizeModels(await responseJson(response))
-    return models
+    return sanitizeModels(await responseJson(response)).map(model => ({
+      ...model,
+      providerName: ({
+        'cliproxy-codex': 'DSH_CLIAPI · Codex',
+        'cliproxy-claude': 'DSH_CLIAPI · Claude',
+        'cliproxy-antigravity': 'DSH_CLIAPI · Antigravity',
+        'cliproxy-kimi': 'DSH_CLIAPI · Kimi',
+        'cliproxy-grok': 'DSH_CLIAPI · Grok',
+      })[model.provider] ?? model.provider,
+      source: 'cliproxy',
+    }))
+  }
+
+  const listHarnessModels = async () => {
+    const groups = await Promise.all(ctx.llm.listProviders()
+      .filter(provider => provider.id !== AUTO_PROVIDER && provider.id !== LEGACY_AUTO_PROVIDER)
+      .map(async (provider) => {
+        try {
+          const models = await ctx.llm.listModels(provider.id)
+          return models.map(model => ({
+            id: model.id,
+            name: model.name,
+            provider: provider.id,
+            providerName: provider.name,
+            source: provider.id.startsWith('cliproxy-') ? 'cliproxy' : 'harness',
+          }))
+        } catch (error) {
+          ctx.logger.warn('DSH_CLIAPI could not list Harness provider %s: %s', provider.id, error instanceof Error ? error.message : String(error))
+          return []
+        }
+      }))
+    return groups.flat()
+  }
+
+  const listModels = async () => {
+    const [harness, cliProxy] = await Promise.all([listHarnessModels(), listCLIProxyModels()])
+    const merged = new Map()
+    for (const model of [...harness, ...cliProxy]) {
+      const key = candidateKey({ provider: model.provider, model: model.id })
+      if (!merged.has(key)) merged.set(key, model)
+    }
+    const sourceRank = { harness: 0, cliproxy: 1 }
+    return [...merged.values()].sort((a, b) =>
+      sourceRank[a.source] - sourceRank[b.source]
+      || a.providerName.localeCompare(b.providerName)
+      || a.name.localeCompare(b.name))
   }
 
   const status = async () => {
@@ -293,7 +496,7 @@ export async function registerControlPlane(ctx, options) {
     return {
       ok: true,
       product: 'DSH_CLIAPI',
-      version: '0.3.0',
+      version: '0.4.0',
       accounts: sanitizeAuthFiles(authPayload),
       models,
       defaultModel: ctx.agentDefaultModel.currentSelection(),
@@ -374,11 +577,12 @@ export async function registerControlPlane(ctx, options) {
         const model = String(body.model ?? '')
         if (provider === AUTO_PROVIDER && model === AUTO_MODEL) {
           if (!autoConfig.enabled || autoConfig.candidates.length === 0) throw new Error('Auto must be enabled with at least one candidate')
-          await ensureProviderRoute(AUTO_PROVIDER, [])
         } else {
           const models = await listModels()
           if (!models.some(entry => entry.provider === provider && entry.id === model)) throw new Error('selected model is not currently available')
-          await ensureProviderRoute(provider, models)
+          if (provider.startsWith('cliproxy-')) {
+            await ensureProviderRoute(provider, await listCLIProxyModels(), model)
+          }
         }
         await ctx.agentDefaultModel.saveSelection({ provider, model })
         json(res, 200, { ok: true, defaultModel: ctx.agentDefaultModel.currentSelection() })
@@ -387,14 +591,19 @@ export async function registerControlPlane(ctx, options) {
       if (req.method === 'PUT' && action === '/auto') {
         const body = await readJson(req)
         const models = await listModels()
-        const available = new Set(models.map(entry => entry.id))
+        const available = new Set(models.map(entry => candidateKey({ provider: entry.provider, model: entry.id })))
         const next = normalizeAutoConfig(body, defaults)
         if (next.candidates.length === 0) throw new Error('Auto needs at least one candidate model')
-        if (next.candidates.some(model => !available.has(model))) throw new Error('Auto candidate is not currently available')
+        if (next.candidates.some(candidate => !available.has(candidateKey(candidate)))) throw new Error('Auto candidate is not currently available')
+        const cliProxyModels = await listCLIProxyModels()
+        for (const candidate of next.candidates) {
+          if (candidate.provider.startsWith('cliproxy-')) {
+            await ensureProviderRoute(candidate.provider, cliProxyModels, candidate.model)
+          }
+        }
         await writeAutoConfig(options.autoConfigPath, next)
         autoConfig = next
         cooldowns.clear()
-        await ensureProviderRoute(AUTO_PROVIDER, [])
         json(res, 200, { ok: true, auto: autoConfig })
         return
       }
@@ -436,10 +645,11 @@ export async function registerControlPlane(ctx, options) {
       return
     }
     const now = Date.now()
-    const ready = autoConfig.candidates.filter(model => (cooldowns.get(model) ?? 0) <= now)
-    const candidates = ready.length > 0 ? ready : autoConfig.candidates
+    const cliProxyCandidates = autoConfig.candidates.filter(candidate => candidate.provider.startsWith('cliproxy-'))
+    const ready = cliProxyCandidates.filter(candidate => (cooldowns.get(candidateKey(candidate)) ?? 0) <= now)
+    const candidates = ready.length > 0 ? ready : cliProxyCandidates
     const failures = []
-    for (const model of candidates) {
+    for (const candidate of candidates) {
       const controller = new AbortController()
       const abort = () => controller.abort()
       req.once('aborted', abort)
@@ -453,34 +663,37 @@ export async function registerControlPlane(ctx, options) {
             accept: String(req.headers.accept ?? 'application/json'),
             'x-dsh-cliapi-auto': '1',
           },
-          body: JSON.stringify({ ...body, model }),
+          body: JSON.stringify({ ...body, model: candidate.model }),
           signal: controller.signal,
         })
         if (!upstream.ok && RETRYABLE_STATUS.has(upstream.status)) {
           const detail = (await upstream.text()).slice(0, 512)
-          failures.push({ model, status: upstream.status, detail })
-          cooldowns.set(model, Date.now() + autoConfig.cooldownSeconds * 1000)
+          failures.push({ ...candidate, status: upstream.status, detail })
+          cooldowns.set(candidateKey(candidate), Date.now() + autoConfig.cooldownSeconds * 1000)
           continue
         }
-        lastDispatch = { model, at: new Date().toISOString(), attempts: failures.length + 1 }
+        lastDispatch = { ...candidate, at: new Date().toISOString(), attempts: failures.length + 1 }
         res.statusCode = upstream.status
         copyResponseHeaders(upstream, res, {
-          'x-dsh-cliapi-model': model,
+          'x-dsh-cliapi-model': candidate.model,
           'x-dsh-cliapi-attempts': String(failures.length + 1),
         })
         await pipeWebBody(upstream, res)
         return
       } catch (error) {
         if (req.destroyed || res.destroyed) return
-        failures.push({ model, status: 0, detail: error instanceof Error ? error.message : String(error) })
-        cooldowns.set(model, Date.now() + autoConfig.cooldownSeconds * 1000)
+        failures.push({ ...candidate, status: 0, detail: error instanceof Error ? error.message : String(error) })
+        cooldowns.set(candidateKey(candidate), Date.now() + autoConfig.cooldownSeconds * 1000)
       } finally {
         req.off('aborted', abort)
         res.off('close', abort)
       }
     }
-    ctx.logger.warn('DSH_CLIAPI Auto exhausted candidates: %s', JSON.stringify(failures.map(({ model, status }) => ({ model, status }))))
-    errorJson(res, 502, `Auto candidates failed: ${failures.map(item => `${item.model} (${String(item.status || 'network')})`).join(', ')}`)
+    ctx.logger.warn('DSH_CLIAPI legacy HTTP Auto exhausted CLIProxyAPI candidates: %s', JSON.stringify(failures.map(({ provider, model, status }) => ({ provider, model, status }))))
+    const detail = failures.length === 0
+      ? 'This compatibility endpoint can only dispatch CLIProxyAPI candidates; use Auto inside DeepSeek Harness for native Harness providers.'
+      : failures.map(item => `${item.provider}/${item.model} (${String(item.status || 'network')})`).join(', ')
+    errorJson(res, 502, `Auto candidates failed: ${detail}`)
   }
 
   const handlePanel = (req, res) => {
@@ -511,10 +724,13 @@ export async function registerControlPlane(ctx, options) {
   })
 
   return async () => {
+    stopLegacyMigration = true
+    await legacyMigration
     disposeEntry()
     disposeProxy()
     disposeApi()
     disposePanel()
+    disposeAutoAdapter()
     dashboardHtml = ''
   }
 }

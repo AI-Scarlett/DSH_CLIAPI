@@ -4,7 +4,7 @@
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek-Harness-5b5bd6)](https://github.com/deepseek-ai/DeepSeek-Harness)
 [![CLIProxyAPI](https://img.shields.io/badge/CLIProxyAPI-v7.2.132-16a085)](https://github.com/router-for-me/CLIProxyAPI)
 
-面向 DeepSeek Harness 的本地 CLI/OAuth 授权中心与 Auto 模型故障切换插件。
+面向 DeepSeek Harness 的本地 CLI/OAuth 授权中心与原生 Auto 模型故障切换插件。
 
 DSH_CLIAPI 负责随 Harness 启停官方 CLIProxyAPI，并在 Harness 内提供一个本机控制面板。用户不需要在终端里逐个执行 OAuth 命令，就能完成账号连接、默认模型设置和 Auto 候选顺序配置。
 
@@ -15,7 +15,8 @@ DSH_CLIAPI 负责随 Harness 启停官方 CLIProxyAPI，并在 Harness 内提供
 - 当前 CLIProxyAPI 内置的全部 5 种 CLI/OAuth 授权入口：Codex、Claude、Antigravity、Kimi、Grok/xAI；
 - 永久可见的三步首次使用向导，以及每个提供方的授权说明和脱敏连接状态；
 - Harness 默认模型设置；
-- `Auto` 自动故障切换：按候选顺序调用，遇到鉴权、限流、网关或模型错误时切换下一模型；
+- 自动汇总 Harness 已配置的 DeepSeek、MiniMax、其他 API provider，以及 CLIProxyAPI 授权模型；
+- Harness 原生 `Auto` 故障切换：不同来源可混排，遇到鉴权、限流、网关或模型错误时切换下一模型；
 - `Auto` 固定在 Harness 模型列表第一项；
 - 回环地址、同源写操作校验、管理密钥隔离和令牌不出本机。
 
@@ -37,11 +38,13 @@ Gemini AI Studio API Key、Vertex 服务账号和自定义 OpenAI 兼容上游�
 完整安装、配置、安全边界和验证方法见 [中文文档](README_CN.md)。安装完成并启动 Harness 后：
 
 1. 点击 Harness 首页右下角的 `DSH_CLIAPI`；
-2. 连接至少一个账号；
+2. 使用 Harness 已配置的 API 模型，或连接至少一个 CLI/OAuth 账号；
 3. 设置 Auto 候选顺序；
 4. 点击“保存并设为默认”。
 
 默认本机面板地址为：`http://127.0.0.1:3080/dsh-cliapi`
+
+Auto 候选按 `provider + model` 保存，面板会分别标注“Harness 已配置模型”和“CLIProxyAPI 授权模型”。0.3.x 的字符串候选和旧 Auto HTTP route 会在重启时自动迁移。兼容入口 `/dsh-cliapi/v1/chat/completions` 只能调度 CLIProxyAPI 候选；混合来源请在 Harness 内选择 `Auto`。
 
 ## 验证
 

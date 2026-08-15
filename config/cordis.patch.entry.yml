@@ -12,8 +12,10 @@
         apiKey: CHANGE_ME_LOCAL_API_KEY
         managementKey: CHANGE_ME_LOCAL_MANAGEMENT_KEY
         defaultAutoCandidates:
-          - grok-4.6
-          - gpt-5.6-luna
-        preferredProvider: dsh-cliapi-auto
+          - provider: deepseek-official
+            model: deepseek-v4-flash
+          - provider: cliproxy-grok
+            model: grok-4.6
+        preferredProvider: dsh-cliapi-auto-native
         startupTimeoutMs: 15000
         shutdownTimeoutMs: 5000

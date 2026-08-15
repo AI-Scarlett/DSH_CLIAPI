@@ -9,6 +9,8 @@ export const name = 'dsh-cliapi'
 export const inject = ['webServer', 'agentDefaultModel', 'settings', 'llm']
 
 const MAX_DIAGNOSTIC_BYTES = 16 * 1024
+const NATIVE_AUTO_PROVIDER = 'dsh-cliapi-auto-native'
+const LEGACY_AUTO_PROVIDER = 'dsh-cliapi-auto'
 
 function requireText(config, key) {
   const value = config?.[key]
@@ -82,11 +84,17 @@ export function apply(ctx, config = {}) {
   const startupTimeoutMs = positiveInteger(config, 'startupTimeoutMs', 15_000)
   const shutdownTimeoutMs = positiveInteger(config, 'shutdownTimeoutMs', 5_000)
   const defaultAutoCandidates = Array.isArray(config.defaultAutoCandidates)
-    ? config.defaultAutoCandidates.filter(value => typeof value === 'string' && value.trim() !== '').slice(0, 8)
+    ? config.defaultAutoCandidates.filter(value => (
+      (typeof value === 'string' && value.trim() !== '')
+      || (value !== null && typeof value === 'object' && !Array.isArray(value))
+    )).slice(0, 12)
     : []
-  const preferredProvider = typeof config.preferredProvider === 'string' && config.preferredProvider.trim() !== ''
+  const configuredPreferredProvider = typeof config.preferredProvider === 'string' && config.preferredProvider.trim() !== ''
     ? config.preferredProvider.trim()
-    : 'dsh-cliapi-auto'
+    : NATIVE_AUTO_PROVIDER
+  const preferredProvider = configuredPreferredProvider === LEGACY_AUTO_PROVIDER
+    ? NATIVE_AUTO_PROVIDER
+    : configuredPreferredProvider
 
   // The Harness catalog follows LLM registration order. Dynamic settings
   // routes register after the native adapter, so give this plugin-owned route
@@ -96,7 +104,7 @@ export function apply(ctx, config = {}) {
     const hadOwn = Object.prototype.hasOwnProperty.call(runtime, 'listProviders')
     const original = runtime.listProviders
     const prioritized = function () {
-      return original.call(this).sort((left, right) => {
+      return original.call(this).filter(provider => provider.id !== LEGACY_AUTO_PROVIDER).sort((left, right) => {
         if (left.id === preferredProvider) return right.id === preferredProvider ? 0 : -1
         if (right.id === preferredProvider) return 1
         return 0
