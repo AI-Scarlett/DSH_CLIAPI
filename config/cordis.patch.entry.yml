@@ -1,0 +1,19 @@
+# DSH_CLIAPI owns the CLIProxyAPI child process and exposes a loopback-only
+# authorization/default-model/Auto control plane to the DeepSeek Harness UI.
+- insert:
+    - id: dsh-cliapi
+      name: '@local/dsh-cliapi'
+      config:
+        executable: !!js dshHomePath('cliproxyapi/bin/cli-proxy-api')
+        configPath: !!js dshHomePath('cliproxyapi/config.yaml')
+        autoConfigPath: !!js dshHomePath('cliproxyapi/dsh-cliapi.json')
+        host: 127.0.0.1
+        port: 8317
+        apiKey: CHANGE_ME_LOCAL_API_KEY
+        managementKey: CHANGE_ME_LOCAL_MANAGEMENT_KEY
+        defaultAutoCandidates:
+          - grok-4.6
+          - gpt-5.6-luna
+        preferredProvider: dsh-cliapi-auto
+        startupTimeoutMs: 15000
+        shutdownTimeoutMs: 5000

@@ -1,0 +1,13 @@
+.DS_Store
+*.log
+*.tmp
+.env
+.env.*
+node_modules/
+coverage/
+
+# Local credentials and runtime state must never be committed.
+auth/
+auths/
+config.yaml
+.credentials.yaml

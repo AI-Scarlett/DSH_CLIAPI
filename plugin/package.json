@@ -1,0 +1,12 @@
+{
+  "name": "@local/dsh-cliapi",
+  "version": "0.3.0",
+  "description": "DSH_CLIAPI authorization center and automatic local model router for DeepSeek Harness",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "exports": "./index.js",
+  "engines": {
+    "node": ">=20"
+  }
+}

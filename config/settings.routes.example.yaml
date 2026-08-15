@@ -1,0 +1,31 @@
+llm-pi-ai:
+  providers:
+    dsh-cliapi-auto:
+      displayName: DSH_CLIAPI · Auto
+      apiKeyEnv: CLIPROXY_API_KEY
+      api: openai-completions
+      baseURL: http://127.0.0.1:3080/dsh-cliapi/v1
+      defaultContextWindow: 200000
+      defaultMaxTokens: 32768
+      models:
+        - id: auto
+          name: Auto · 自动故障切换
+    cliproxy-codex:
+      displayName: DSH_CLIAPI · Codex
+      apiKeyEnv: CLIPROXY_API_KEY
+      api: openai-responses
+      baseURL: http://127.0.0.1:8317/v1
+      models:
+        - id: gpt-5.6-luna
+          name: GPT-5.6 Luna
+    cliproxy-grok:
+      displayName: DSH_CLIAPI · Grok
+      apiKeyEnv: CLIPROXY_API_KEY
+      api: openai-completions
+      baseURL: http://127.0.0.1:8317/v1
+      models:
+        - id: grok-4.6
+          name: Grok 4.6
+agent-default-model:
+  provider: dsh-cliapi-auto
+  model: auto
