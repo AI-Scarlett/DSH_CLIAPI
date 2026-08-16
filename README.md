@@ -16,7 +16,7 @@ DSH_CLIAPI 负责随 Harness 启停官方 CLIProxyAPI，并在 Harness 内提供
 已经使用 DeepSeek Harness 的 macOS / Linux 用户，直接执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.4.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.4.1/install.sh | bash
 ```
 
 安装器会下载并校验官方 CLIProxyAPI、生成本机随机密钥、注册 Harness 插件，最后输出并尝试打开：

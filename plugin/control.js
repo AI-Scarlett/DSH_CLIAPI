@@ -198,6 +198,54 @@ function commitsCandidate(chunk) {
     || chunk?.type === 'block-end'
 }
 
+/**
+ * Drop adapter-private replay metadata from any assistant message in the
+ * caller-supplied history. Each inner mutation is shallow: the message and
+ * its `source` object are copied only when an entry needs trimming, so a
+ * history that already carries no replay metadata reuses the originals.
+ *
+ * pi-ai binds the replay state to the exact provider/model that produced
+ * the original assistant turn. The native Auto route records every turn
+ * under `dsh-cliapi-auto-native/auto`, so any candidate-owned `replayState`
+ * that leaked into history will fail the next call with
+ * `invalid pi-ai replay state: provider does not match assistant source`.
+ * Removing the metadata here keeps the cross-candidate path safe.
+ *
+ * @param {readonly unknown[]} messages - the original `messages` array.
+ * @returns {unknown[]} a new array safe to forward to a candidate request.
+ */
+export function stripReplayStateFromHistory(messages) {
+  const list = Array.isArray(messages) ? messages : []
+  let result = list
+  for (let index = 0; index < list.length; index += 1) {
+    const message = list[index]
+    const source = message?.source
+    if (message?.role !== 'assistant' || source?.replayState === undefined) continue
+    const copy = { ...message, source: { ...source } }
+    delete copy.source.replayState
+    if (result === list) result = list.slice()
+    result[index] = copy
+  }
+  return result
+}
+
+/**
+ * Strip adapter-private replay metadata from a terminal finish chunk so the
+ * outer `dsh-cliapi-auto-native/auto` assistant source can never be paired
+ * with replay state that belongs to a routed candidate. Non-finish chunks
+ * (and finish chunks without `replayState`) are returned unchanged so the
+ * caller can pipe them through without an extra allocation.
+ *
+ * @param {unknown} chunk
+ * @returns {unknown}
+ */
+export function stripReplayStateFromChunk(chunk) {
+  if (chunk?.type !== 'finish' || chunk?.replayState === undefined) return chunk
+  const { replayState, ...rest } = chunk
+  void replayState
+  return rest
+}
+
 /** Build the native Harness Auto adapter. Exported for the failover test. */
 export function createAutoAdapter(ctx, state) {
   return {
@@ -247,6 +295,13 @@ export function createAutoAdapter(ctx, state) {
       const now = Date.now()
       const ready = config.candidates.filter(candidate => (state.cooldowns.get(candidateKey(candidate)) ?? 0) <= now)
       const candidates = ready.length > 0 ? ready : config.candidates
+      // The history that ships in the agent's outer request may carry
+      // replay metadata from a previous turn's candidate provider. Removing
+      // it once per call lets every candidate start from a clean slate
+      // without leaking candidate-owned replay state back into the outer
+      // `dsh-cliapi-auto-native/auto` assistant source.
+      const sanitizedMessages = stripReplayStateFromHistory(options?.messages)
+      const baseRequest = { ...options, messages: sanitizedMessages }
       const failures = []
       for (const candidate of candidates) {
         if (options.signal?.aborted) {
@@ -257,24 +312,25 @@ export function createAutoAdapter(ctx, state) {
         let committed = false
         let failed = null
         try {
-          for await (const chunk of ctx.llm.stream({ ...options, provider: candidate.provider, model: candidate.model })) {
-            if (!committed && chunk.type === 'finish' && (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted')) {
-              if (chunk.reason.kind === 'aborted' && options.signal?.aborted) {
-                yield chunk
+          for await (const chunk of ctx.llm.stream({ ...baseRequest, provider: candidate.provider, model: candidate.model })) {
+            const sanitized = stripReplayStateFromChunk(chunk)
+            if (!committed && sanitized.type === 'finish' && (sanitized.reason.kind === 'error' || sanitized.reason.kind === 'aborted')) {
+              if (sanitized.reason.kind === 'aborted' && options.signal?.aborted) {
+                yield sanitized
                 return
               }
-              failed = chunk.reason.failure
+              failed = sanitized.reason.failure
               break
             }
             if (!committed) {
-              pending.push(chunk)
-              if (commitsCandidate(chunk) || chunk.type === 'finish') {
+              pending.push(sanitized)
+              if (commitsCandidate(sanitized) || sanitized.type === 'finish') {
                 committed = true
                 state.setLastDispatch({ ...candidate, at: new Date().toISOString(), attempts: failures.length + 1 })
                 yield* pending
               }
             } else {
-              yield chunk
+              yield sanitized
             }
           }
         } catch (error) {
@@ -509,7 +565,7 @@ export async function registerControlPlane(ctx, options) {
     return {
       ok: true,
       product: 'DSH_CLIAPI',
-      version: '0.4.0',
+      version: '0.4.1',
       accounts: sanitizeAuthFiles(authPayload),
       models,
       defaultModel: ctx.agentDefaultModel.currentSelection(),

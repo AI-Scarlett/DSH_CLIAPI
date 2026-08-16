@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-cliapi",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "DSH_CLIAPI authorization center and automatic local model router for DeepSeek Harness",
   "private": true,
   "type": "module",
