@@ -58,6 +58,30 @@ function positiveInteger(config, key, fallback) {
   return value
 }
 
+function normalizeModelCapabilities(value) {
+  if (value === undefined) return {}
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('dsh-cliapi: config.modelCapabilities must be an object')
+  }
+  const result = {}
+  for (const [key, capability] of Object.entries(value).slice(0, 128)) {
+    const slash = key.indexOf('/')
+    const provider = key.slice(0, slash)
+    const model = key.slice(slash + 1)
+    if (slash <= 0 || slash === key.length - 1
+      || !/^[a-z0-9._-]+$/.test(provider)
+      || !/^[A-Za-z0-9._:/-]+$/.test(model)) {
+      throw new TypeError(`dsh-cliapi: invalid model capability key ${key}`)
+    }
+    const input = Array.isArray(capability?.input) ? [...new Set(capability.input)] : []
+    if (input.length === 0 || input.some(item => item !== 'text' && item !== 'image')) {
+      throw new TypeError(`dsh-cliapi: modelCapabilities.${key}.input must contain text and/or image`)
+    }
+    result[key] = { input }
+  }
+  return result
+}
+
 function canConnect(host, port, timeoutMs = 250) {
   return new Promise((resolve) => {
     const socket = connect({ host, port })
@@ -120,6 +144,7 @@ export function apply(ctx, config = {}) {
   const preferredProvider = configuredPreferredProvider === LEGACY_AUTO_PROVIDER
     ? NATIVE_AUTO_PROVIDER
     : configuredPreferredProvider
+  const modelCapabilities = normalizeModelCapabilities(config.modelCapabilities)
 
   // The Harness catalog follows LLM registration order. Dynamic settings
   // routes register after the native adapter, so give this plugin-owned route
@@ -183,6 +208,7 @@ export function apply(ctx, config = {}) {
         managementKey,
         autoConfigPath,
         defaultAutoCandidates,
+        modelCapabilities,
       })
     } catch (error) {
       await stopProcess(child, shutdownTimeoutMs)

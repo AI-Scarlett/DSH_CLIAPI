@@ -21,6 +21,29 @@ const OAUTH_ENDPOINTS = Object.freeze({
   grok: 'xai-auth-url',
 })
 
+export function buildModelEntry(id, name, capabilities = {}) {
+  const input = Array.isArray(capabilities.input) && capabilities.input.length > 0
+    ? [...capabilities.input]
+    : ['text']
+  return { id, name, input }
+}
+
+export function mergeModelEntry(declared, addition) {
+  const index = declared.findIndex(model => model?.id === addition.id)
+  if (index < 0) return [...declared, addition]
+  const existing = declared[index]
+  const merged = { ...addition, ...existing }
+  if (!Array.isArray(existing.input) || existing.input.length === 0) merged.input = addition.input
+  const sameInput = Array.isArray(existing.input)
+    && Array.isArray(merged.input)
+    && existing.input.length === merged.input.length
+    && existing.input.every((value, inputIndex) => value === merged.input[inputIndex])
+  if (existing.name === merged.name && sameInput) return declared
+  const next = declared.slice()
+  next[index] = merged
+  return next
+}
+
 function json(res, status, value) {
   const body = JSON.stringify(value)
   res.writeHead(status, {
@@ -393,6 +416,7 @@ async function pipeWebBody(upstream, res) {
 export async function registerControlPlane(ctx, options) {
   const upstreamBase = `http://${options.host}:${String(options.port)}`
   const managementBase = `${upstreamBase}/v0/management`
+  const capabilityFor = (provider, model) => options.modelCapabilities?.[`${provider}/${model}`] ?? {}
   const defaults = normalizeAutoConfig({ candidates: options.defaultAutoCandidates }, []).candidates
   let dashboardHtml = await readFile(DASHBOARD_FILE, 'utf8')
   let autoConfig
@@ -440,6 +464,25 @@ export async function registerControlPlane(ctx, options) {
     ctx.logger.warn('DSH_CLIAPI could not migrate the v0.3 Auto route: %s', error instanceof Error ? error.message : String(error))
   })
 
+  const updatePiSettings = async (patch) => {
+    const descriptor = ctx.settings.describe().find(entry => entry.ns === 'llm-pi-ai')
+    await ctx.settings.update('llm-pi-ai', patch, descriptor?.revision)
+  }
+
+  const refreshProviderInputs = (provider, freshModels) => {
+    const current = ctx.settings.get('llm-pi-ai')
+    const existing = current?.providers?.[provider]
+    if (existing === undefined) return false
+    const declared = Array.isArray(existing.models) ? existing.models : []
+    let merged = declared
+    for (const currentModel of declared) {
+      const fresh = freshModels.find(entry => entry.id === currentModel?.id)
+      if (fresh === undefined) continue
+      merged = mergeModelEntry(merged, fresh)
+    }
+    return merged === declared ? false : merged
+  }
+
   const ensureProviderRoute = async (provider, models, requiredModel) => {
     const current = ctx.settings.get('llm-pi-ai')
     const route = {
@@ -450,19 +493,21 @@ export async function registerControlPlane(ctx, options) {
       'cliproxy-grok': { displayName: 'DSH_CLIAPI · Grok', api: 'openai-completions' },
     }[provider]
     if (route !== undefined) {
-      const providerModels = models.filter(entry => entry.provider === provider).map(entry => ({ id: entry.id, name: entry.name }))
+      const providerModels = models
+        .filter(entry => entry.provider === provider)
+        .map(entry => buildModelEntry(entry.id, entry.name, capabilityFor(provider, entry.id)))
       if (providerModels.length === 0) throw new Error(`${route.displayName} models are not available yet`)
       const existing = current?.providers?.[provider]
       if (existing !== undefined) {
         const declared = Array.isArray(existing.models) ? existing.models : []
-        let nextModels = declared
-        if (requiredModel !== undefined && !declared.some(model => model?.id === requiredModel)) {
+        let nextModels = refreshProviderInputs(provider, providerModels) || declared
+        if (requiredModel !== undefined && !nextModels.some(model => model?.id === requiredModel)) {
           const addition = providerModels.find(model => model.id === requiredModel)
           if (addition === undefined) throw new Error(`${route.displayName} model ${requiredModel} is not available yet`)
-          nextModels = [...declared, addition]
+          nextModels = mergeModelEntry(nextModels, addition)
         }
         if (existing.apiKeyEnv !== PROXY_CREDENTIAL_REF || nextModels !== declared) {
-          await ctx.settings.update('llm-pi-ai', {
+          await updatePiSettings( {
             providers: {
               [provider]: {
                 apiKeyEnv: PROXY_CREDENTIAL_REF,
@@ -473,7 +518,7 @@ export async function registerControlPlane(ctx, options) {
         }
         return
       }
-      await ctx.settings.update('llm-pi-ai', {
+      await updatePiSettings( {
         providers: {
           [provider]: {
             displayName: route.displayName,
@@ -522,8 +567,28 @@ export async function registerControlPlane(ctx, options) {
         'cliproxy-grok': 'DSH_CLIAPI · Grok',
       })[model.provider] ?? model.provider,
       source: 'cliproxy',
+      input: buildModelEntry(model.id, model.name, capabilityFor(model.provider, model.id)).input,
     }))
   }
+
+  const inputMigration = (async () => {
+    for (let attempt = 0; attempt < 300 && !stopLegacyMigration; attempt += 1) {
+      if (ctx.settings.get('llm-pi-ai') !== undefined) break
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    if (stopLegacyMigration || ctx.settings.get('llm-pi-ai') === undefined) return
+    const models = await listCLIProxyModels()
+    for (const provider of new Set(models.map(model => model.provider))) {
+      const fresh = models
+        .filter(model => model.provider === provider)
+        .map(model => buildModelEntry(model.id, model.name, capabilityFor(provider, model.id)))
+      const merged = refreshProviderInputs(provider, fresh)
+      if (merged === false) continue
+      await updatePiSettings( { providers: { [provider]: { models: merged } } })
+    }
+  })().catch(error => {
+    ctx.logger.warn('DSH_CLIAPI could not migrate model input modalities: %s', error instanceof Error ? error.message : String(error))
+  })
 
   const listHarnessModels = async () => {
     const groups = await Promise.all(ctx.llm.listProviders()
@@ -794,7 +859,7 @@ export async function registerControlPlane(ctx, options) {
 
   return async () => {
     stopLegacyMigration = true
-    await legacyMigration
+    await Promise.all([legacyMigration, inputMigration])
     disposeEntry()
     disposeProxy()
     disposeApi()

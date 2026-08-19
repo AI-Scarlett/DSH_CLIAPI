@@ -1,11 +1,32 @@
 import assert from 'node:assert/strict'
 import {
+  buildModelEntry,
   createAutoAdapter,
+  mergeModelEntry,
   stripReplayStateFromChunk,
   stripReplayStateFromHistory,
 } from '../plugin/control.js'
 
 // ---------- Pure helpers ----------
+{
+  assert.deepEqual(buildModelEntry('grok-4.6', 'Grok 4.6').input, ['text'])
+  assert.deepEqual(buildModelEntry('future-reasoner', 'Future Reasoner').input, ['text'])
+  assert.deepEqual(
+    buildModelEntry('grok-4.6', 'Grok 4.6', { input: ['text', 'image'] }).input,
+    ['text', 'image'],
+  )
+
+  const declared = [{ id: 'grok-4.6', name: 'Custom Grok', input: [] }]
+  const migrated = mergeModelEntry(declared, buildModelEntry('grok-4.6', 'Upstream Grok'))
+  assert.deepEqual(migrated[0].input, ['text'])
+  assert.equal(migrated[0].name, 'Custom Grok')
+  assert.deepEqual(declared[0].input, [])
+  assert.equal(mergeModelEntry(migrated, buildModelEntry('grok-4.6', 'Grok 4.6')), migrated)
+
+  const overridden = [{ id: 'grok-4.6', name: 'Grok 4.6', input: ['text'] }]
+  assert.equal(mergeModelEntry(overridden, buildModelEntry('grok-4.6', 'Grok 4.6')), overridden)
+  console.log('HARNESS_MODEL_INPUT_MODALITIES_OK')
+}
 {
   const replayState = { kind: 'pi-ai', version: 1, provider: 'cliproxy-grok', model: 'grok-4.6' }
   const original = [
