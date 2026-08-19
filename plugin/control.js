@@ -851,16 +851,10 @@ export async function registerControlPlane(ctx, options) {
   const disposePanel = ctx.webServer.register({ kind: 'exact', path: PANEL_PATH, handler: handlePanel })
   const disposeApi = ctx.webServer.register({ kind: 'prefix', path: API_PATH, handler: handleApi })
   const disposeProxy = ctx.webServer.register({ kind: 'prefix', path: PROXY_PATH, handler: handleProxy })
-  const disposeEntry = ctx.webServer.tapIndex((html) => {
-    if (html.includes('data-dsh-cliapi-entry')) return html
-    const entry = '<a data-dsh-cliapi-entry href="/dsh-cliapi" target="_blank" rel="noopener" title="配置授权、默认模型和 Auto 调度" style="position:fixed;right:18px;bottom:18px;z-index:2147483640;padding:9px 13px;border-radius:12px;background:#111827;color:#fff;text-decoration:none;font:600 13px/1.2 system-ui;box-shadow:0 8px 28px #0004">DSH_CLIAPI</a>'
-    return html.includes('</body>') ? html.replace('</body>', `${entry}</body>`) : `${html}${entry}`
-  })
 
   return async () => {
     stopLegacyMigration = true
     await Promise.all([legacyMigration, inputMigration])
-    disposeEntry()
     disposeProxy()
     disposeApi()
     disposePanel()
