@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { installInterceptor } from './llm-adapter.js'
 import { AUTO_PROVIDER, LANES, looksLikeGenerator, suggestLane } from './llm-classify.js'
 
-export const PLUGIN_VERSION = '0.5.0'
+export const PLUGIN_VERSION = '0.5.1'
 
 export function migrateDefaultSelection(selection, config) {
   if (selection?.provider !== AUTO_PROVIDER) return null

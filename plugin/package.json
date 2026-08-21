@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-cliapi",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Unified DSH_CLIAPI authorization, automatic model failover and multimodal routing for DeepSeek Harness",
   "private": true,
   "type": "module",

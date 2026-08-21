@@ -630,7 +630,7 @@ export async function registerControlPlane(ctx, options) {
     return {
       ok: true,
       product: 'DSH_CLIAPI',
-      version: '0.5.0',
+      version: '0.5.1',
       accounts: sanitizeAuthFiles(authPayload),
       models,
       defaultModel: ctx.agentDefaultModel.currentSelection(),

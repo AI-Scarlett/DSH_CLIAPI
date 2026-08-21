@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: 'dsh-cliapi',
+  id: '@local/dsh-cliapi',
   factory: (require) => {
     const module = { exports: {} }
     const React = require('react')
