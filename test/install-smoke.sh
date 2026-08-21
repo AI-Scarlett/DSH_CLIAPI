@@ -25,12 +25,35 @@ CLIPROXYAPI_BINARY="$fake_proxy" \
 for required_file in \
   "${test_root}/home/plugins/dsh-cliapi/package.json" \
   "${test_root}/home/plugins/dsh-cliapi/cordis.patch.yml" \
+  "${test_root}/home/plugins/dsh-cliapi/client.js" \
+  "${test_root}/home/plugins/dsh-cliapi/llm-control.js" \
+  "${test_root}/home/plugins/dsh-cliapi/llm-dashboard.html" \
   "${test_root}/home/cliproxyapi/bin/cli-proxy-api" \
   "${test_root}/home/cliproxyapi/config.yaml" \
   "${test_root}/home/cliproxyapi/plugin-secrets.json" \
   "${test_root}/home/cliproxyapi/dsh-cliapi.json"; do
   [[ -f "$required_file" ]] || { echo "missing ${required_file}" >&2; exit 1; }
 done
+
+fake_bin="${test_root}/fake-bin"
+official_home="${test_root}/official-home"
+dsh_args="${test_root}/dsh-args.txt"
+mkdir -p "$fake_bin" "$official_home"
+official_home="$(cd "$official_home" && pwd -P)"
+printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$@" > "$DSH_CLIAPI_DSH_ARGS"' > "${fake_bin}/dsh"
+chmod 755 "${fake_bin}/dsh"
+PATH="${fake_bin}:${PATH}" \
+DSH_HOME="$official_home" \
+DSH_CLIAPI_DSH_ARGS="$dsh_args" \
+DSH_CLIAPI_SOURCE_DIR="$repo_root" \
+DSH_CLIAPI_START=0 \
+DSH_CLIAPI_OPEN_BROWSER=0 \
+CLIPROXYAPI_BINARY="$fake_proxy" \
+  "$repo_root/install.sh" --no-start --no-open >/dev/null
+expected_args="$(printf '%s\n' plugin --profile web add -w "link:${official_home}/plugins/dsh-cliapi")"
+actual_args="$(sed -n '1,6p' "$dsh_args")"
+[[ "$actual_args" == "$expected_args" ]] \
+  || { printf 'installer DSH argv mismatch\nexpected:\n%s\nactual:\n%s\n' "$expected_args" "$actual_args" >&2; exit 1; }
 
 DSH_SMOKE_HOME="${test_root}/home" node <<'NODE'
 import { readFile, stat } from 'node:fs/promises'

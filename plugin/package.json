@@ -1,7 +1,7 @@
 {
   "name": "@local/dsh-cliapi",
-  "version": "0.4.1",
-  "description": "DSH_CLIAPI authorization center and automatic local model router for DeepSeek Harness",
+  "version": "0.5.0",
+  "description": "Unified DSH_CLIAPI authorization, automatic model failover and multimodal routing for DeepSeek Harness",
   "private": true,
   "type": "module",
   "main": "./index.js",
@@ -18,7 +18,6 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-ui-settings"
       ],
       "platform": "web"
@@ -28,9 +27,28 @@
     "node": ">=20"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.8 <0.2.0",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.0-rc.8 <0.2.0",
     "react": ">=18.2.0"
+  },
+  "files": [
+    "index.js",
+    "control.js",
+    "client.js",
+    "dashboard.html",
+    "llm-adapter.js",
+    "llm-classify.js",
+    "llm-control.js",
+    "llm-dashboard.html",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AI-Scarlett/DSH_CLIAPI.git"
+  },
+  "homepage": "https://github.com/AI-Scarlett/DSH_CLIAPI",
+  "scripts": {
+    "test": "node --test ../test/*.mjs"
   }
 }

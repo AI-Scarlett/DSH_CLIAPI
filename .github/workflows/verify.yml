@@ -19,7 +19,5 @@ jobs:
         run: bash -n install.sh
       - name: Test installer bootstrap
         run: bash test/install-smoke.sh
-      - name: Test native Auto failover
-        run: node --test test/auto-failover.mjs
-      - name: Test settings client contract
-        run: node --test test/settings-client.test.mjs
+      - name: Test unified plugin contracts
+        run: node --test test/*.mjs

@@ -257,15 +257,234 @@ window.__ModuleLoader__.load({
     }
 
     const name = 'dsh-cliapi'
+    const LLM_LANES = [
+      { id: 'text', title: '文本回退（可选）', hint: '媒体模型都失败时才用。平时普通对话仍走当前会话模型。' },
+      { id: 'image', title: '图片', hint: '识图、看截图、生图。' },
+      { id: 'video', title: '视频', hint: '看视频、生成视频。' },
+      { id: 'audio', title: '音频', hint: '听录音、转写、配音。' },
+    ]
+
+    const llmKeyOf = item => `${item.provider}\u0000${item.model || item.id}`
+
+    async function llmApi(path, options = {}) {
+      const response = await fetch(`/dshllm-api/api${path}`, {
+        ...options,
+        headers: { 'content-type': 'application/json', ...(options.headers || {}) },
+      })
+      const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+      if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`)
+      return payload
+    }
+
+    function emptyLanes() {
+      return { text: [], image: [], video: [], audio: [] }
+    }
+
+    function LlmApiPanel() {
+      const [payload, setPayload] = useState(null)
+      const [lanes, setLanes] = useState(emptyLanes)
+      const [enabled, setEnabled] = useState(true)
+      const [cooldown, setCooldown] = useState(60)
+      const [error, setError] = useState('')
+      const [notice, setNotice] = useState('')
+      const [busy, setBusy] = useState('')
+
+      const refresh = useCallback(async () => {
+        const next = await llmApi('/status')
+        setPayload(next)
+        setLanes({
+          text: (next.router?.lanes?.text ?? []).map(item => ({ ...item })),
+          image: (next.router?.lanes?.image ?? []).map(item => ({ ...item })),
+          video: (next.router?.lanes?.video ?? []).map(item => ({ ...item })),
+          audio: (next.router?.lanes?.audio ?? []).map(item => ({ ...item })),
+        })
+        setEnabled(next.router?.enabled !== false)
+        setCooldown(next.router?.cooldownSeconds ?? 60)
+      }, [])
+
+      useEffect(() => {
+        refresh().catch(item => setError(item.message))
+      }, [refresh])
+
+      const flash = (message, bad = false) => {
+        if (bad) { setError(message); setNotice('') } else { setNotice(message); setError('') }
+      }
+
+      const move = (lane, index, delta) => {
+        setLanes(current => {
+          const list = current[lane].slice()
+          if (delta === 0) {
+            list.splice(index, 1)
+          } else {
+            const target = index + delta
+            if (target < 0 || target >= list.length) return current
+            ;[list[index], list[target]] = [list[target], list[index]]
+          }
+          return { ...current, [lane]: list }
+        })
+      }
+
+      const addToLane = (lane, value) => {
+        const [provider, model] = value.split('\u0000')
+        if (!provider || !model) return
+        setLanes(current => {
+          if (Object.values(current).flat().some(item => item.provider === provider && item.model === model)) return current
+          return { ...current, [lane]: [...current[lane], { provider, model }] }
+        })
+      }
+
+      const saveDefault = async () => {
+        const select = document.getElementById('dshllm-default')
+        if (!select) return
+        const [provider, model] = select.value.split('\u0000')
+        setBusy('default')
+        try {
+          await llmApi('/default-model', { method: 'POST', body: JSON.stringify({ provider, model }) })
+          flash('默认模型已更新；新会话会使用它。')
+          await refresh()
+        } catch (item) {
+          flash(item.message, true)
+        } finally {
+          setBusy('')
+        }
+      }
+
+      const saveRouter = async () => {
+        setBusy('router')
+        try {
+          await llmApi('/router', {
+            method: 'PUT',
+            body: JSON.stringify({ enabled, lanes, cooldownSeconds: Number(cooldown) }),
+          })
+          flash('调度设置已保存。普通对话仍用当前模型，媒体任务会自动切换。')
+          await refresh()
+        } catch (item) {
+          flash(item.message, true)
+        } finally {
+          setBusy('')
+        }
+      }
+
+      if (!payload) {
+        return React.createElement('section', { style: styles.root },
+          React.createElement('h2', { style: styles.heading }, '多模态调度'),
+          React.createElement('p', { style: styles.muted }, error || '正在读取调度状态…'))
+      }
+
+      const used = new Set(Object.values(lanes).flat().map(llmKeyOf))
+
+      return React.createElement('section', { style: styles.root, 'aria-label': 'DSH_CLIAPI 多模态调度' },
+        React.createElement('div', null,
+          React.createElement('h2', { style: styles.heading }, '多模态调度（已合并到 DSH_CLIAPI）'),
+          React.createElement('p', { style: { ...styles.muted, marginTop: 6 } },
+            `本机服务 v${payload.version} · 在设置里配置图片/视频/音频优先级，不再打开单独的浏览器面板。`)),
+        error ? React.createElement('div', { style: styles.notice }, error) : null,
+        notice ? React.createElement('div', { style: styles.notice }, notice) : null,
+        React.createElement('article', { style: styles.card },
+          React.createElement('h3', { style: { margin: '0 0 8px', fontSize: 16 } }, '当前推理模型'),
+          React.createElement('p', { style: styles.muted }, '普通对话继续用这个模型。媒体调度不依赖它。'),
+          React.createElement('div', { style: styles.row },
+            React.createElement('select', {
+              id: 'dshllm-default',
+              style: { ...styles.input, ...styles.grow },
+              defaultValue: `${payload.defaultModel?.provider ?? ''}\u0000${payload.defaultModel?.model ?? ''}`,
+            }, (payload.models ?? []).map(model => React.createElement('option', {
+              key: llmKeyOf(model),
+              value: `${model.provider}\u0000${model.id}`,
+            }, `${model.source === 'cliproxy' ? 'CLIProxyAPI' : 'Harness'} · ${model.providerName} · ${model.name}`))),
+            React.createElement('button', { style: styles.primary, disabled: busy === 'default', onClick: saveDefault },
+              busy === 'default' ? '正在保存…' : '设为默认'))),
+        React.createElement('article', { style: styles.card },
+          React.createElement('label', { style: { ...styles.muted, display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 } },
+            React.createElement('input', { type: 'checkbox', checked: enabled, onChange: event => setEnabled(event.target.checked) }),
+            '启用自动调度'),
+          React.createElement('div', { style: styles.grid },
+            LLM_LANES.map(lane => {
+              const available = (payload.models ?? []).filter(model => !used.has(llmKeyOf(model)))
+              const preferred = available.filter(model => model.suggestedLane === lane.id)
+              const others = available.filter(model => model.suggestedLane !== lane.id)
+              return React.createElement('div', { key: lane.id },
+                React.createElement('h3', { style: { margin: '0 0 4px', fontSize: 15 } }, lane.title),
+                React.createElement('p', { style: styles.muted }, lane.hint),
+                lanes[lane.id].map((candidate, index) => {
+                  const model = (payload.models ?? []).find(item => item.provider === candidate.provider && item.id === candidate.model)
+                  return React.createElement('div', { key: `${candidate.provider}/${candidate.model}`, style: styles.candidate },
+                    React.createElement('span', null, String(index + 1)),
+                    React.createElement('code', null, model ? `${model.providerName} / ${model.name}` : `${candidate.provider} / ${candidate.model}`),
+                    React.createElement('div', null,
+                      React.createElement('button', { style: styles.button, disabled: index === 0, onClick: () => move(lane.id, index, -1) }, '↑'),
+                      React.createElement('button', { style: styles.button, disabled: index === lanes[lane.id].length - 1, onClick: () => move(lane.id, index, 1) }, '↓'),
+                      React.createElement('button', { style: styles.button, onClick: () => move(lane.id, index, 0) }, '×')))
+                }),
+                React.createElement('div', { style: { ...styles.row, marginTop: 8 } },
+                  React.createElement('select', { id: `dshllm-add-${lane.id}`, style: { ...styles.input, ...styles.grow } },
+                    [...preferred, ...others].map(model => React.createElement('option', {
+                      key: llmKeyOf(model),
+                      value: `${model.provider}\u0000${model.id}`,
+                    }, `${model.suggestedLane === lane.id ? '建议 · ' : ''}${model.providerName} · ${model.name}`))),
+                  React.createElement('button', {
+                    style: styles.button,
+                    onClick: () => {
+                      const select = document.getElementById(`dshllm-add-${lane.id}`)
+                      if (select?.value) addToLane(lane.id, select.value)
+                    },
+                  }, '添加')))
+            })),
+          React.createElement('label', { style: { ...styles.label, marginTop: 12 } }, '同类失败冷却（秒）'),
+          React.createElement('input', {
+            type: 'number', min: 5, max: 600, step: 5, value: cooldown, style: styles.input,
+            onChange: event => setCooldown(event.target.value),
+          }),
+          React.createElement('div', { style: { marginTop: 12 } },
+            React.createElement('button', { style: styles.primary, disabled: Boolean(busy), onClick: saveRouter },
+              busy === 'router' ? '正在保存…' : '保存调度设置')),
+          React.createElement('p', { style: { ...styles.muted, marginTop: 8 } },
+            payload.router?.lastDispatch
+              ? `最近调度：${payload.router.lastDispatch.lane} → ${payload.router.lastDispatch.provider} / ${payload.router.lastDispatch.model}`
+              : '最近调度：暂无')))
+    }
+
+    function UnifiedPanel() {
+      const [tab, setTab] = useState('authorization')
+      const tabs = [
+        { id: 'authorization', label: '授权与 Auto' },
+        { id: 'multimodal', label: '多模态调度' },
+      ]
+      return React.createElement('section', {
+        style: { display: 'flex', flexDirection: 'column', gap: 16, width: '100%' },
+        'aria-label': 'DSH_CLIAPI 模型与授权',
+      },
+      React.createElement('div', {
+        role: 'tablist',
+        'aria-label': '模型与授权功能',
+        style: { display: 'flex', gap: 8, borderBottom: '1px solid var(--dsw-alias-border-l2)', paddingBottom: 8 },
+      }, tabs.map(item => React.createElement('button', {
+        key: item.id,
+        type: 'button',
+        role: 'tab',
+        'aria-selected': tab === item.id,
+        style: {
+          ...styles.button,
+          fontWeight: tab === item.id ? 700 : 400,
+          borderColor: tab === item.id ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-border-l2)',
+        },
+        onClick: () => setTab(item.id),
+      }, item.label))),
+      tab === 'authorization'
+        ? React.createElement(CliapiPanel)
+        : React.createElement(LlmApiPanel))
+    }
+
+
     const inject = ['slots']
     function apply(ctx) {
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section',
         id: 'dsh-cliapi',
         order: 8,
-        label: () => '授权与 Auto',
+        label: () => '模型与授权',
         inject: () => ({}),
-      }, CliapiPanel))
+      }, UnifiedPanel))
     }
 
     module.exports = { name, inject, apply }

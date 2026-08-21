@@ -1,6 +1,6 @@
-# DSH_CLIAPI 0.4.1
+# DSH_CLIAPI 0.5.0
 
-DSH_CLIAPI 是专门给 DeepSeek Harness 使用的本地授权与模型调度插件。它不修改 CLIProxyAPI 核心，而是让 Harness 启停官方 CLIProxyAPI 二进制，并提供一个本机控制面板：
+DSH_CLIAPI 是专门给 DeepSeek Harness 使用的统一授权与模型调度插件。0.5.0 已合并原 DSHLLM_API；它不修改 CLIProxyAPI 或 DSH 核心，而是让 Harness 启停官方 CLIProxyAPI 二进制，并在一个设置分区中提供两个页签：
 
 - 当前 CLIProxyAPI 内置的全部 5 种 CLI/OAuth 授权：Codex、Claude、Antigravity、Kimi、Grok/xAI；
 - 脱敏账号状态和可用模型列表；
@@ -8,7 +8,8 @@ DSH_CLIAPI 是专门给 DeepSeek Harness 使用的本地授权与模型调度插
 - Harness 已配置模型和 CLIProxyAPI 授权模型的统一目录；
 - Harness 原生 `Auto` 模型：DeepSeek API、MiniMax API、其他 Harness provider 与 CLIProxyAPI 模型可混排，遇到鉴权、限流、网关或模型错误后切换到下一候选；
 - `Auto` 固定显示在 Harness 模型列表的绝对首位；
-- Harness 首页右下角的 `DSH_CLIAPI` 入口。
+- 图片、视频、音频与可选文本回退的多模态调度；
+- 「设置 → 模型与授权」下的「授权与 Auto」「多模态调度」两个页签。
 
 Cursor 是模型客户端，不是 CLIProxyAPI 的 OAuth 提供方。它可以连接本机 OpenAI 兼容地址，但此版本不导入 Cursor 账号授权。
 
@@ -17,7 +18,7 @@ Cursor 是模型客户端，不是 CLIProxyAPI 的 OAuth 提供方。它可以�
 适用于已经使用 DeepSeek Harness 的 macOS 和 Linux。需要 Node.js 20+、`curl` 和 `tar`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.4.1/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.0/install.sh | bash
 ```
 
 安装器会自动完成：
@@ -42,20 +43,20 @@ npx @deepseek-ai/dsh --profile web
 不希望安装器启动 Harness 或打开浏览器时：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.4.1/install.sh | bash -s -- --no-start --no-open
+curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.0/install.sh | bash -s -- --no-start --no-open
 ```
 
 不习惯直接执行网络脚本，可以先下载审阅：
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.4.1/install.sh
+curl -fsSLO https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.0/install.sh
 less install.sh
 bash install.sh
 ```
 
 ## 首次使用与提供方目录
 
-安装并启动后，Harness 首页右下角会固定显示 `DSH_CLIAPI` 入口。面板顶部提供不会自动隐藏的三步向导：
+安装并启动后，打开 Harness「设置 → 模型与授权」。内部提供「授权与 Auto」「多模态调度」两个页签：
 
 1. 准备至少一个模型来源：使用 Harness 已配置的 API 模型，或在面板连接 CLI/OAuth 账号；
 2. 设置 Auto 候选模型顺序；
@@ -126,22 +127,16 @@ provider 和模型名以你自己的 Harness 面板实际显示为准，不需�
 
 1. 先把官方 `cli-proxy-api` 二进制放到 `$DSH_HOME/cliproxyapi/bin/cli-proxy-api`。
 2. 将 `plugin/` 复制到 `$DSH_HOME/plugins/dsh-cliapi/`。
-3. 在目标 profile 的 `package.json` 中加入依赖并把 `@local/dsh-cliapi` 加入 `dsh.profile.bundles`：
-
-   ```json
-   "@local/dsh-cliapi": "link:/绝对路径/.dsh/plugins/dsh-cliapi"
-   ```
-
-4. 让 profile 的 `node_modules/@local/dsh-cliapi` 指向插件目录。官方 `dsh plugin --profile web add ...` 可自动完成依赖和 bundle 注册。
-5. 生成两个不同的本机随机值，保存到 `$DSH_HOME/cliproxyapi/plugin-secrets.json`，字段为 `apiKey` 和 `managementKey`，权限设为 `600`。
-6. 将 `config/cliproxyapi.example.yaml` 调整绝对 `auth-dir` 后保存为 `$DSH_HOME/cliproxyapi/config.yaml`，并确保其中两枚密钥与 `plugin-secrets.json` 一致。
-7. 重启 Harness，打开 `http://127.0.0.1:3080/dsh-cliapi`。插件会自动创建 CLIProxyAPI 模型路由，不需要再手工编辑 Harness 的模型列表。
+3. 只使用官方固定参数 CLI 注册 bundle：`dsh plugin --profile web add -w link:/绝对路径/.dsh/plugins/dsh-cliapi`。不要直接编辑 profile manifest、patch 或 `node_modules`。
+4. 生成两个不同的本机随机值，保存到 `$DSH_HOME/cliproxyapi/plugin-secrets.json`，字段为 `apiKey` 和 `managementKey`，权限设为 `600`。
+5. 将 `config/cliproxyapi.example.yaml` 调整绝对 `auth-dir` 后保存为 `$DSH_HOME/cliproxyapi/config.yaml`，并确保其中两枚密钥与 `plugin-secrets.json` 一致。
+6. 重启 Harness，打开「设置 → 模型与授权」。插件会自动创建 CLIProxyAPI 与多模态模型路由，不需要手工编辑 Harness 的模型列表。
 
 如果已有 `cordis.patch.yml` 或 `settings.yaml`，必须按键合并，不能整文件覆盖。安装前应先备份。
 
-### 从 0.3.x 升级
+### 从 0.3.x / 0.4.x 或独立 DSHLLM_API 升级
 
-重新执行“一条命令安装”即可。安装器会备份旧插件并保留已有 CLIProxyAPI 配置与 OAuth 认证目录。0.4 会自动把旧的字符串候选（例如 `"grok-4.6"`）迁移为 `provider + model` 对象，并删除旧的 `llm-pi-ai.providers.dsh-cliapi-auto` HTTP 路由；其他 provider 和默认模型设置不会被覆盖。
+重新执行“一条命令安装”即可。安装器会备份旧插件并保留已有 CLIProxyAPI 配置与 OAuth 认证目录。0.5.0 继续读取原 `$DSH_HOME/dshllm-api.json`，并保留 `dshllm-api/auto` provider ID 与 `/dshllm-api/api` 路由以完成平滑迁移。独立 DSHLLM_API bundle 应由商城迁移流程停用，不要与合并版同时加载。
 
 ## 验证
 
@@ -151,9 +146,16 @@ provider 和模型名以你自己的 Harness 面板实际显示为准，不需�
 ./verify.sh
 ```
 
-预期看到 `product: DSH_CLIAPI` 和版本 `0.4.1`。脚本随后通过兼容 HTTP 入口验证 CLIProxyAPI 候选，响应中的 `model` 会标明实际命中的模型。Harness 与 API 模型的混合调度应在 Harness 内使用 `Auto` 验证。
+预期看到 `product: DSH_CLIAPI` 和版本 `0.5.0`。脚本随后通过兼容 HTTP 入口验证 CLIProxyAPI 候选，响应中的 `model` 会标明实际命中的模型。Harness 与 API 模型的混合调度应在 Harness 内使用 `Auto` 验证。
 
 开发时可运行 `node test/auto-failover.mjs`；测试会依次模拟 Harness API 失败、CLIProxyAPI 连接异常，并断言第三个自定义 API provider 接管、参数得到保留且前两个候选进入冷却。
+
+### 验收状态边界
+
+- **已验证**：源码单测、安装器临时目录 smoke、语法与打包清单。
+- **部分验证**：兼容 provider/API/config 契约已由测试覆盖，但尚未代表真实账号可用。
+- **未验证**：真实 Profile 安装、DSH 重启后的 Web UI、商城公开条目回读。
+- **受阻**：缺官方 CLI、CLIProxyAPI 或账号授权时的真实运行验收；不得用静态测试替代。
 
 ## 上游与许可
 

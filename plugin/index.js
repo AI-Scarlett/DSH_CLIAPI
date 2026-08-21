@@ -5,6 +5,7 @@ import { connect } from 'node:net'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { PROXY_CREDENTIAL_REF, registerControlPlane } from './control.js'
+import { registerControlPlane as registerLlmControlPlane } from './llm-control.js'
 
 export const name = 'dsh-cliapi'
 export const inject = ['webServer', 'agentDefaultModel', 'settings', 'llm', 'credentials']
@@ -34,6 +35,7 @@ async function resolveRuntimeConfig(config) {
   const executable = optionalText(config, 'executable', join(dshHome, 'cliproxyapi', 'bin', 'cli-proxy-api'))
   const configPath = optionalText(config, 'configPath', join(dshHome, 'cliproxyapi', 'config.yaml'))
   const autoConfigPath = optionalText(config, 'autoConfigPath', join(dshHome, 'cliproxyapi', 'dsh-cliapi.json'))
+  const routerConfigPath = optionalText(config, 'routerConfigPath', join(dshHome, 'dshllm-api.json'))
   const secretsPath = optionalText(config, 'secretsPath', join(dshHome, 'cliproxyapi', 'plugin-secrets.json'))
   let apiKey = typeof config?.apiKey === 'string' ? config.apiKey.trim() : ''
   let managementKey = typeof config?.managementKey === 'string' ? config.managementKey.trim() : ''
@@ -47,7 +49,7 @@ async function resolveRuntimeConfig(config) {
     if (apiKey === '') apiKey = requireText(secrets, 'apiKey')
     if (managementKey === '') managementKey = requireText(secrets, 'managementKey')
   }
-  return { executable, configPath, autoConfigPath, apiKey, managementKey }
+  return { executable, configPath, autoConfigPath, routerConfigPath, apiKey, managementKey }
 }
 
 function positiveInteger(config, key, fallback) {
@@ -80,6 +82,20 @@ function normalizeModelCapabilities(value) {
     result[key] = { input }
   }
   return result
+}
+
+function normalizeDefaultLanes(value) {
+  const lanes = { text: [], image: [], video: [], audio: [] }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return lanes
+  for (const lane of Object.keys(lanes)) {
+    const source = value[lane]
+    if (!Array.isArray(source)) continue
+    lanes[lane] = source.filter(entry => (
+      (typeof entry === 'string' && entry.trim() !== '')
+      || (entry !== null && typeof entry === 'object' && !Array.isArray(entry))
+    )).slice(0, 12)
+  }
+  return lanes
 }
 
 function canConnect(host, port, timeoutMs = 250) {
@@ -145,6 +161,7 @@ export function apply(ctx, config = {}) {
     ? NATIVE_AUTO_PROVIDER
     : configuredPreferredProvider
   const modelCapabilities = normalizeModelCapabilities(config.modelCapabilities)
+  const defaultLanes = normalizeDefaultLanes(config.defaultLanes)
 
   // The Harness catalog follows LLM registration order. Dynamic settings
   // routes register after the native adapter, so give this plugin-owned route
@@ -169,7 +186,14 @@ export function apply(ctx, config = {}) {
   }, 'dsh-cliapi.provider-priority')
 
   ctx.effect(async () => {
-    const { executable, configPath, autoConfigPath, apiKey, managementKey } = await resolveRuntimeConfig(config)
+    const {
+      executable,
+      configPath,
+      autoConfigPath,
+      routerConfigPath,
+      apiKey,
+      managementKey,
+    } = await resolveRuntimeConfig(config)
     await Promise.all([access(executable), access(configPath)])
     if (await canConnect(host, port)) {
       throw new Error(`dsh-cliapi: ${host}:${String(port)} is already in use`)
@@ -196,6 +220,7 @@ export function apply(ctx, config = {}) {
     }
 
     let disposeControlPlane
+    let disposeLlmControlPlane
     try {
       // llm-pi-ai resolves named credentials through Harness on every request;
       // writing through the official service keeps the proxy key durable,
@@ -210,17 +235,31 @@ export function apply(ctx, config = {}) {
         defaultAutoCandidates,
         modelCapabilities,
       })
+      disposeLlmControlPlane = await registerLlmControlPlane(ctx, {
+        configPath: routerConfigPath,
+        defaultLanes,
+        cliProxyBaseURL: `http://${host}:${String(port)}`,
+        cliProxyApiKey: apiKey,
+      })
     } catch (error) {
-      await stopProcess(child, shutdownTimeoutMs)
+      try {
+        if (disposeControlPlane) await disposeControlPlane()
+      } finally {
+        await stopProcess(child, shutdownTimeoutMs)
+      }
       throw error
     }
-    ctx.logger.info('DSH_CLIAPI ready at http://%s:%d/dsh-cliapi', ctx.webServer.host, ctx.webServer.port)
+    ctx.logger.info('DSH_CLIAPI unified control ready at http://%s:%d/dsh-cliapi', ctx.webServer.host, ctx.webServer.port)
 
     return async () => {
       try {
-        await disposeControlPlane()
+        if (disposeLlmControlPlane) await disposeLlmControlPlane()
       } finally {
-        await stopProcess(child, shutdownTimeoutMs)
+        try {
+          await disposeControlPlane()
+        } finally {
+          await stopProcess(child, shutdownTimeoutMs)
+        }
       }
       ctx.logger.info('DSH_CLIAPI stopped')
     }

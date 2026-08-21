@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DSH_CLIAPI_VERSION="${DSH_CLIAPI_VERSION:-0.4.1}"
+DSH_CLIAPI_VERSION="${DSH_CLIAPI_VERSION:-0.5.0}"
 DSH_CLIAPI_REF="${DSH_CLIAPI_REF:-v${DSH_CLIAPI_VERSION}}"
 CLIPROXYAPI_VERSION="${CLIPROXYAPI_VERSION:-7.2.132}"
 DSH_HOME_DIR="${DSH_HOME:-${HOME}/.dsh}"
@@ -120,7 +120,8 @@ else
   [[ -n "$source_root" && -f "${source_root}/plugin/package.json" ]] || fail "downloaded source archive does not contain plugin/package.json"
   cp -R "${source_root}/plugin/." "$stage_plugin/"
 fi
-for required_file in package.json index.js control.js dashboard.html cordis.patch.yml; do
+for required_file in package.json index.js control.js client.js dashboard.html \
+  llm-adapter.js llm-classify.js llm-control.js llm-dashboard.html cordis.patch.yml; do
   [[ -f "${stage_plugin}/${required_file}" ]] || fail "plugin package is missing ${required_file}"
 done
 
@@ -291,79 +292,18 @@ if (!(await exists(autoPath))) {
 await chmod(autoPath, 0o600)
 NODE
 
-if [[ "$SKIP_PLUGIN_ADD" != "1" ]]; then
-  log "registering the plugin in the ${DSH_PROFILE} Harness profile"
-  DSH_INSTALL_HOME="$DSH_HOME_DIR" DSH_INSTALL_PROFILE="$DSH_PROFILE" DSH_INSTALL_PLUGIN="$plugin_dir" node <<'NODE'
-import { lstat, mkdir, readFile, readlink, rename, symlink, unlink, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-
-const home = process.env.DSH_INSTALL_HOME
-const profile = process.env.DSH_INSTALL_PROFILE
-const pluginDir = process.env.DSH_INSTALL_PLUGIN
-if (!/^[A-Za-z0-9._-]+$/.test(profile) || profile === '.' || profile === '..') throw new Error('invalid Harness profile name')
-
-const profileDir = join(home, 'profiles', profile)
-const manifestPath = join(profileDir, 'package.json')
-const patchPath = join(profileDir, 'cordis.patch.yml')
-const workspacePath = join(profileDir, 'pnpm-workspace.yaml')
-await mkdir(profileDir, { recursive: true })
-
-let manifest
-try {
-  manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-} catch (error) {
-  if (error?.code !== 'ENOENT') throw error
-  const bundles = profile === 'web'
-    ? ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']
-    : ['@deepseek-ai/dsh-base']
-  manifest = { name: `dsh-profile-${profile}`, private: true, dependencies: {}, dsh: { profile: { bundles } } }
-}
-
-manifest.dependencies = { ...(manifest.dependencies ?? {}), '@local/dsh-cliapi': `link:${pluginDir}` }
-manifest.dsh = { ...(manifest.dsh ?? {}), profile: { ...(manifest.dsh?.profile ?? {}) } }
-const bundles = Array.isArray(manifest.dsh.profile.bundles) ? [...manifest.dsh.profile.bundles] : []
-if (!bundles.includes('@local/dsh-cliapi')) bundles.push('@local/dsh-cliapi')
-manifest.dsh.profile.bundles = bundles
-
-try {
-  const old = await readFile(manifestPath)
-  await writeFile(`${manifestPath}.pre-dsh-cliapi`, old, { flag: 'w' })
-} catch (error) {
-  if (error?.code !== 'ENOENT') throw error
-}
-const manifestTemp = `${manifestPath}.tmp-${process.pid}`
-await writeFile(manifestTemp, `${JSON.stringify(manifest, null, 2)}\n`)
-await rename(manifestTemp, manifestPath)
-
-try { await lstat(patchPath) } catch (error) {
-  if (error?.code !== 'ENOENT') throw error
-  await writeFile(patchPath, '# Your patch layer for this dsh profile.\n[]\n')
-}
-try { await lstat(workspacePath) } catch (error) {
-  if (error?.code !== 'ENOENT') throw error
-  await writeFile(workspacePath, 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n')
-}
-
-const linkPath = join(profileDir, 'node_modules', '@local', 'dsh-cliapi')
-await mkdir(dirname(linkPath), { recursive: true })
-try {
-  const current = await lstat(linkPath)
-  if (!current.isSymbolicLink()) throw new Error(`${linkPath} exists and is not a symlink`)
-  if ((await readlink(linkPath)) !== pluginDir) await unlink(linkPath)
-  else process.exit(0)
-} catch (error) {
-  if (error?.code !== 'ENOENT') throw error
-}
-await symlink(pluginDir, linkPath, 'junction')
-NODE
-fi
-
 if command -v dsh >/dev/null 2>&1; then
   dsh_command=(dsh)
 elif command -v npx >/dev/null 2>&1; then
   dsh_command=(npx --yes @deepseek-ai/dsh)
 else
   dsh_command=()
+fi
+
+if [[ "$SKIP_PLUGIN_ADD" != "1" ]]; then
+  [[ ${#dsh_command[@]} -gt 0 ]] || fail "the official DSH CLI is required to register the plugin"
+  log "registering the plugin in the ${DSH_PROFILE} Harness profile through the official DSH CLI"
+  env DSH_HOME="$DSH_HOME_DIR" "${dsh_command[@]}" plugin --profile "$DSH_PROFILE" add -w "link:${plugin_dir}"
 fi
 
 panel_ready() {

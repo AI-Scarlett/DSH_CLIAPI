@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DSHLLM_API</title>
+  <style>
+    :root{color-scheme:light;--bg:#f3f7f6;--card:#fff;--ink:#13241f;--muted:#5d726c;--line:#d7e3df;--brand:#0f766e;--brand2:#115e59;--ok:#087c53;--bad:#b42318;--shadow:0 16px 40px rgba(19,36,31,.08)}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 0 0,#d9f3ee 0,transparent 36%),var(--bg);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink)}
+    main{width:min(1100px,calc(100% - 32px));margin:36px auto 72px}.hero{display:flex;justify-content:space-between;gap:28px;align-items:flex-start;margin-bottom:22px}.eyebrow{font-weight:750;letter-spacing:.14em;color:var(--brand);font-size:12px}h1{font-size:36px;line-height:1.08;margin:6px 0 10px;letter-spacing:-.04em}.lead{color:var(--muted);max-width:720px;margin:0}.pill{white-space:nowrap;background:#e7f7f1;color:var(--ok);padding:7px 11px;border-radius:999px;font-weight:700}
+    .notice{display:none;margin:0 0 16px;padding:11px 14px;border-radius:12px;background:#ecfdf5;color:#115e59;border:1px solid #bbf7d0}.notice.show{display:block}.notice.bad{background:#fff0ee;color:var(--bad);border-color:#ffc9c3}
+    .card{background:var(--card);border:1px solid rgba(215,227,223,.95);border-radius:18px;padding:20px;box-shadow:var(--shadow);margin-bottom:16px}.cardhead{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}.card h2{margin:0;font-size:18px}.desc{color:var(--muted);font-size:13px;margin:3px 0 0}
+    .lanes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.lane{border:1px solid var(--line);border-radius:14px;padding:13px;background:#f8fbfa}.lane h3{margin:0 0 4px;font-size:15px}.lane .hint{color:var(--muted);font-size:12px;margin:0 0 10px}
+    .candidate{display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:center;border:1px solid var(--line);border-radius:11px;padding:7px 8px;margin:6px 0;background:#fff}.num{width:24px;height:24px;border-radius:8px;background:#d1fae5;color:#115e59;display:grid;place-items:center;font-weight:800}.copy{min-width:0}.copy code{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tag{display:inline-block;margin-top:3px;font-size:10px;font-weight:800;padding:2px 6px;border-radius:999px;background:#ecfdf5;color:#0f766e}
+    button,select,input{font:inherit}button{border:0;border-radius:10px;padding:8px 12px;font-weight:720;cursor:pointer;background:#e8efed;color:#1f3a34}button.primary{color:#fff;background:linear-gradient(135deg,var(--brand),var(--brand2))}button.danger{background:#fff1ef;color:var(--bad)}button:disabled{cursor:not-allowed;opacity:.48}select,input[type=number]{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#fff}
+    label{display:block;font-weight:700;margin-bottom:6px}.row{display:flex;gap:10px;align-items:end}.row>.grow{flex:1}.mini{padding:5px 8px;border-radius:8px}.switchrow{display:flex;align-items:center;gap:10px;margin-bottom:12px}.switchrow label{margin:0}.switchrow input{width:18px;height:18px}
+    .current{margin:12px 0 0;color:var(--muted);font-size:13px}.current strong{color:var(--ink)}.footer{margin-top:18px;color:var(--muted);font-size:12px;text-align:center}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    .loader{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:6px}@keyframes spin{to{transform:rotate(360deg)}}
+    @media(max-width:860px){.lanes,.hero,.row{display:block}h1{font-size:30px}}
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <div>
+        <div class="eyebrow">DEEPSEEK HARNESS MODEL ROUTER</div>
+        <h1>DSHLLM_API</h1>
+        <p class="lead">默认开启透明调度。普通对话继续用当前模型；只有图片、视频、音频任务才会按优先级自动切换。可以在下面关掉。</p>
+      </div>
+      <div class="pill" id="servicePill">正在连接…</div>
+    </section>
+    <div class="notice" id="notice"></div>
+
+    <section class="card">
+      <div class="cardhead">
+        <div>
+          <h2>当前推理模型</h2>
+          <p class="desc">这只是普通对话用的模型。媒体调度不依赖它，也不需要选择 Auto。</p>
+        </div>
+      </div>
+      <div class="row">
+        <div class="grow">
+          <label for="defaultModel">模型</label>
+          <select id="defaultModel"></select>
+        </div>
+        <button class="primary" id="saveDefault">设为默认</button>
+      </div>
+      <p class="current" id="currentDefault">当前默认：读取中…</p>
+    </section>
+
+    <section class="card">
+      <div class="cardhead">
+        <div>
+          <h2>媒体模型优先级</h2>
+          <p class="desc">只给图片、视频、音频排顺序。文本推理始终用当前会话模型。</p>
+        </div>
+        <div class="switchrow">
+          <input id="enabled" type="checkbox">
+          <label for="enabled">启用自动调度</label>
+        </div>
+      </div>
+      <div class="lanes" id="lanes"></div>
+      <div class="row" style="margin-top:16px">
+        <div class="grow">
+          <label for="cooldown">同类失败冷却（秒）</label>
+          <input id="cooldown" type="number" min="5" max="600" step="5">
+        </div>
+        <button class="primary" id="saveRouter">保存调度设置</button>
+      </div>
+      <p class="current" id="lastDispatch">最近调度：暂无</p>
+    </section>
+    <p class="footer">只监听本机回环地址 · 不会改你在 DSH_CLIAPI 里配好的授权</p>
+  </main>
+  <script>
+    const LANES = [
+      { id: 'text', title: '文本回退（可选）', hint: '媒体模型都失败时才用。平时普通对话仍走当前会话模型。' },
+      { id: 'image', title: '图片', hint: '识图、看截图、生图。理解模型和生成模型可以混排。' },
+      { id: 'video', title: '视频', hint: '看视频、生成视频。没有可用模型时会回退到文本。' },
+      { id: 'audio', title: '音频', hint: '听录音、转写、配音。没有可用模型时会回退到文本。' },
+    ]
+    const state = { payload: null, lanes: { text: [], image: [], video: [], audio: [] } }
+    const $ = selector => document.querySelector(selector)
+    const notice = (message, bad = false) => {
+      const el = $('#notice')
+      el.textContent = message
+      el.className = `notice show${bad ? ' bad' : ''}`
+      window.clearTimeout(notice.timer)
+      notice.timer = window.setTimeout(() => { el.className = 'notice' }, 7000)
+    }
+    const api = async (path, options = {}) => {
+      const response = await fetch(`/dshllm-api/api${path}`, {
+        ...options,
+        headers: { 'content-type': 'application/json', ...(options.headers || {}) },
+      })
+      const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+      if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`)
+      return payload
+    }
+    const setBusy = (button, busy, label) => {
+      if (!button) return
+      button.disabled = busy
+      if (busy) {
+        button.dataset.label = button.textContent
+        button.innerHTML = `<span class="loader"></span>${label}`
+      } else {
+        button.textContent = button.dataset.label || label
+      }
+    }
+    const keyOf = item => `${item.provider}\u0000${item.model || item.id}`
+    const findModel = candidate => state.payload.models.find(model => model.provider === candidate.provider && model.id === candidate.model)
+
+    function renderDefault() {
+      const select = $('#defaultModel')
+      select.replaceChildren()
+      for (const model of state.payload.models) {
+        const option = document.createElement('option')
+        option.value = `${model.provider}\u0000${model.id}`
+        option.textContent = `${model.source === 'cliproxy' ? 'CLIProxyAPI' : 'Harness'} · ${model.providerName} · ${model.name}`
+        select.append(option)
+      }
+      const current = state.payload.defaultModel
+      select.value = `${current.provider}\u0000${current.model}`
+      $('#currentDefault').innerHTML = ''
+      const label = document.createTextNode('当前默认：')
+      const strong = document.createElement('strong')
+      strong.textContent = `${current.provider} / ${current.model}`
+      $('#currentDefault').append(label, strong)
+    }
+
+    function renderLane(lane) {
+      const box = document.createElement('article')
+      box.className = 'lane'
+      const meta = LANES.find(item => item.id === lane)
+      const heading = document.createElement('h3')
+      heading.textContent = meta.title
+      const hint = document.createElement('p')
+      hint.className = 'hint'
+      hint.textContent = meta.hint
+      box.append(heading, hint)
+      state.lanes[lane].forEach((candidate, index) => {
+        const model = findModel(candidate)
+        const row = document.createElement('div')
+        row.className = 'candidate'
+        const num = document.createElement('span')
+        num.className = 'num'
+        num.textContent = String(index + 1)
+        const copy = document.createElement('div')
+        copy.className = 'copy'
+        const code = document.createElement('code')
+        code.textContent = model ? `${model.providerName} / ${model.name}` : `${candidate.provider} / ${candidate.model}`
+        const tag = document.createElement('span')
+        tag.className = 'tag'
+        tag.textContent = model?.source === 'cliproxy' ? 'CLIProxyAPI' : 'Harness'
+        copy.append(code, tag)
+        const controls = document.createElement('div')
+        for (const [label, delta] of [['↑', -1], ['↓', 1], ['×', 0]]) {
+          const button = document.createElement('button')
+          button.className = `mini${label === '×' ? ' danger' : ''}`
+          button.textContent = label
+          button.disabled = (delta < 0 && index === 0) || (delta > 0 && index === state.lanes[lane].length - 1)
+          button.addEventListener('click', () => {
+            if (delta === 0) state.lanes[lane].splice(index, 1)
+            else {
+              const target = index + delta
+              ;[state.lanes[lane][index], state.lanes[lane][target]] = [state.lanes[lane][target], state.lanes[lane][index]]
+            }
+            renderLanes()
+          })
+          controls.append(button)
+        }
+        row.append(num, copy, controls)
+        box.append(row)
+      })
+      const addRow = document.createElement('div')
+      addRow.className = 'row'
+      const select = document.createElement('select')
+      select.className = 'grow'
+      const used = new Set(Object.values(state.lanes).flat().map(keyOf))
+      const options = state.payload.models.filter(model => !used.has(keyOf(model)))
+      const preferred = options.filter(model => model.suggestedLane === lane)
+      const others = options.filter(model => model.suggestedLane !== lane)
+      const fill = (label, list) => {
+        if (list.length === 0) return
+        const group = document.createElement('optgroup')
+        group.label = label
+        for (const model of list) {
+          const option = document.createElement('option')
+          option.value = `${model.provider}\u0000${model.id}`
+          option.textContent = `${model.providerName} · ${model.name}`
+          group.append(option)
+        }
+        select.append(group)
+      }
+      fill('建议放入此类', preferred)
+      fill('其它已发现模型', others)
+      const add = document.createElement('button')
+      add.textContent = '添加'
+      add.addEventListener('click', () => {
+        const [provider, model] = select.value.split('\u0000')
+        if (provider && model) {
+          state.lanes[lane].push({ provider, model })
+          renderLanes()
+        }
+      })
+      addRow.append(select, add)
+      box.append(addRow)
+      return box
+    }
+
+    function renderLanes() {
+      const root = $('#lanes')
+      root.replaceChildren()
+      for (const lane of LANES) root.append(renderLane(lane.id))
+    }
+
+    function renderRouter() {
+      state.lanes = {
+        text: state.payload.router.lanes.text.map(item => ({ ...item })),
+        image: state.payload.router.lanes.image.map(item => ({ ...item })),
+        video: state.payload.router.lanes.video.map(item => ({ ...item })),
+        audio: state.payload.router.lanes.audio.map(item => ({ ...item })),
+      }
+      $('#enabled').checked = state.payload.router.enabled !== false
+      $('#cooldown').value = String(state.payload.router.cooldownSeconds)
+      renderLanes()
+      const last = state.payload.router.lastDispatch
+      $('#lastDispatch').textContent = last
+        ? `最近调度：${last.lane}/${last.intent} → ${last.provider} / ${last.model} · ${new Date(last.at).toLocaleString()} · 尝试 ${last.attempts} 次`
+        : '最近调度：暂无'
+    }
+
+    async function refresh() {
+      try {
+        state.payload = await api('/status')
+        $('#servicePill').textContent = `本机服务正常 · v${state.payload.version}`
+        renderDefault()
+        renderRouter()
+      } catch (error) {
+        $('#servicePill').textContent = '服务不可用'
+        notice(error.message, true)
+      }
+    }
+
+    async function saveRouter() {
+      const button = $('#saveRouter')
+      setBusy(button, true, '正在保存')
+      try {
+        await api('/router', {
+          method: 'PUT',
+          body: JSON.stringify({
+            enabled: $('#enabled').checked,
+            lanes: state.lanes,
+            cooldownSeconds: Number($('#cooldown').value),
+          }),
+        })
+        notice('调度设置已保存。普通对话仍用当前模型，媒体任务会自动切换。')
+        await refresh()
+      } catch (error) {
+        notice(error.message, true)
+      } finally {
+        setBusy(button, false, '保存调度设置')
+      }
+    }
+
+    $('#saveDefault').addEventListener('click', async () => {
+      const button = $('#saveDefault')
+      const [provider, model] = $('#defaultModel').value.split('\u0000')
+      setBusy(button, true, '正在保存')
+      try {
+        await api('/default-model', { method: 'POST', body: JSON.stringify({ provider, model }) })
+        notice('默认模型已更新；新会话会使用它。')
+        await refresh()
+      } catch (error) {
+        notice(error.message, true)
+      } finally {
+        setBusy(button, false, '设为默认')
+      }
+    })
+    $('#saveRouter').addEventListener('click', () => saveRouter())
+    refresh()
+  </script>
+</body>
+</html>
