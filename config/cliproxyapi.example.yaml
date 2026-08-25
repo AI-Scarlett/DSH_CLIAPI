@@ -8,7 +8,7 @@ tls:
 
 remote-management:
   allow-remote: false
-  secret-key: "CHANGE_ME_LOCAL_MANAGEMENT_KEY"
+  secret-key: "<CHANGE_ME_LOCAL_MANAGEMENT_KEY>"
   disable-control-panel: true
 
 auth-dir: "/ABSOLUTE/PATH/TO/.dsh/cliproxyapi/auths"
