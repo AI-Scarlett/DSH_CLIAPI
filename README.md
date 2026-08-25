@@ -11,6 +11,10 @@
 
 0.5.1 修复 rc.8 Web 客户端 ModuleLoader 注册名，使模块 ID 与包名 `@local/dsh-cliapi` 精确一致。
 
+## DSH 兼容声明
+
+本版本标准 DSH Bundle 的兼容范围是 `dsh >=0.1.0-rc.8 <0.2.0`：`rc.7` 不兼容，`rc.8`、`0.1.1-rc.1` 和 `0.1.1-rc.2` 为兼容声明。这是来源包的版本契约，不等同于每个版本的真实 Profile 安装、启动、卸载或回滚验收；这些生命周期证据由 DSH STORE 独立记录。
+
 > 本项目是社区插件，并非 DeepSeek 或 CLIProxyAPI 官方项目。源码包不包含 CLIProxyAPI 二进制。
 
 ## 一条命令安装

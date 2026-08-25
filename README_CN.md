@@ -4,6 +4,10 @@ DSH_CLIAPI 是专门给 DeepSeek Harness 使用的统一授权与模型调度插
 
 0.5.1 修复 rc.8 Web 客户端 ModuleLoader 注册名，使模块 ID 与包名 `@local/dsh-cliapi` 精确一致。
 
+## DSH 兼容声明
+
+本版本标准 DSH Bundle 的兼容范围是 `dsh >=0.1.0-rc.8 <0.2.0`：`rc.7` 不兼容，`rc.8`、`0.1.1-rc.1` 和 `0.1.1-rc.2` 为兼容声明。这是源码兼容契约，不代表每个 DSH 版本都已完成真实 Profile 的安装、启动、卸载和回滚验收；商城会单独展示这些证据。
+
 - 当前 CLIProxyAPI 内置的全部 5 种 CLI/OAuth 授权：Codex、Claude、Antigravity、Kimi、Grok/xAI；
 - 脱敏账号状态和可用模型列表；
 - Harness 默认模型设置；
