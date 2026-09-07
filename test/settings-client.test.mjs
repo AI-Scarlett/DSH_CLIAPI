@@ -7,13 +7,15 @@ const root = new URL('../', import.meta.url)
 test('package exposes a web settings client', async () => {
   const pkg = JSON.parse(await readFile(new URL('plugin/package.json', root), 'utf8'))
   assert.equal(pkg.exports['./client'], './client.js')
-  assert.equal(pkg.version, '0.5.2')
+  assert.ok(pkg.files.includes('LICENSE'))
+  assert.equal(await readFile(new URL('plugin/LICENSE', root), 'utf8'), await readFile(new URL('LICENSE', root), 'utf8'))
+  assert.equal(pkg.version, '0.5.3')
   for (const release of ['0.1.2-alpha.4', '0.1.2-alpha.5', '0.1.2-rc.1']) {
     assert.equal(pkg.dsh.compatibility.dshReleases[release], 'compatible')
   }
   assert.equal(pkg.dsh.client.platform, 'web')
   assert.ok(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-settings'))
-  assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-client-ui-settings'], '>=0.1.0-rc.8 <0.2.0')
+  assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-client-ui-settings'], '>=0.1.0-rc.8 <0.2.0 || 0.1.3-alpha.1')
   assert.ok(!pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-slots'))
 })
 
