@@ -9,6 +9,8 @@
 
 从 0.5.0 起，原 DSHLLM_API 已合并进 DSH_CLIAPI。插件随 Harness 启停官方 CLIProxyAPI，并在「设置 → 模型与授权」的两个页签中统一提供账号连接、默认模型、Auto 候选和图片/视频/音频调度。
 
+0.5.3 补齐独立子包中的 MIT 许可证，并新增 DSH `0.1.3-alpha.1` 精确兼容声明，通过官方源码构建宿主的隔离配置合成和启动。没有使用真实账号验证模型调用或 OAuth；这些仍单独验收。以下为 0.5.2 的历史证据。
+
 0.5.2 在保留 rc.8 Web 客户端修复的同时，完成 DSH `0.1.2-alpha.4`、`0.1.2-alpha.5` 与 `0.1.2-rc.1` 的一次性 Profile 安装、配置合成、冷启动、卸载和关闭清理验收。
 
 ## DSH 兼容声明
@@ -22,7 +24,7 @@
 已经使用 DeepSeek Harness 的 macOS / Linux 用户，直接执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.2/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.3/install.sh | bash
 ```
 
 安装器会下载并校验官方 CLIProxyAPI、生成本机随机密钥、注册 Harness 插件，最后输出并尝试打开：
