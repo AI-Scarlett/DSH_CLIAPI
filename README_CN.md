@@ -26,7 +26,7 @@ Cursor 是模型客户端，不是 CLIProxyAPI 的 OAuth 提供方。它可以�
 适用于已经使用 DeepSeek Harness 的 macOS 和 Linux。需要 Node.js 20+、`curl` 和 `tar`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.2/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.3/install.sh | bash
 ```
 
 安装器会自动完成：
@@ -51,13 +51,13 @@ npx @deepseek-ai/dsh --profile web
 不希望安装器启动 Harness 或打开浏览器时：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.2/install.sh | bash -s -- --no-start --no-open
+curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.3/install.sh | bash -s -- --no-start --no-open
 ```
 
 不习惯直接执行网络脚本，可以先下载审阅：
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.2/install.sh
+curl -fsSLO https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.3/install.sh
 less install.sh
 bash install.sh
 ```
