@@ -1,8 +1,8 @@
-# DSH_CLIAPI 0.5.3
+# DSH_CLIAPI 0.5.4
 
 DSH_CLIAPI 是专门给 DeepSeek Harness 使用的统一授权与模型调度插件。0.5.0 已合并原 DSHLLM_API；它不修改 CLIProxyAPI 或 DSH 核心，而是让 Harness 启停官方 CLIProxyAPI 二进制，并在一个设置分区中提供两个页签：
 
-0.5.3 补齐独立子包中的 MIT 许可证，并新增 DSH `0.1.3-alpha.1` 精确兼容声明，通过官方源码构建宿主的隔离配置合成和启动。没有使用真实账号验证模型调用或 OAuth；这些仍单独验收。以下为 0.5.2 的历史证据。
+0.5.4 补齐独立子包中的 MIT 许可证，并新增 DSH `0.1.5-alpha.2` 精确兼容声明，通过官方源码构建宿主的隔离配置合成和启动。没有使用真实账号验证模型调用或 OAuth；这些仍单独验收。以下为 0.5.2 的历史证据。
 
 0.5.2 在保留 rc.8 Web 客户端修复的同时，完成 DSH `0.1.2-alpha.4`、`0.1.2-alpha.5` 与 `0.1.2-rc.1` 的一次性 Profile 安装、配置合成、冷启动、卸载和关闭清理验收。
 
@@ -26,7 +26,7 @@ Cursor 是模型客户端，不是 CLIProxyAPI 的 OAuth 提供方。它可以�
 适用于已经使用 DeepSeek Harness 的 macOS 和 Linux。需要 Node.js 20+、`curl` 和 `tar`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.3/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.4/install.sh | bash
 ```
 
 安装器会自动完成：
@@ -51,13 +51,13 @@ npx @deepseek-ai/dsh --profile web
 不希望安装器启动 Harness 或打开浏览器时：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.3/install.sh | bash -s -- --no-start --no-open
+curl -fsSL https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.4/install.sh | bash -s -- --no-start --no-open
 ```
 
 不习惯直接执行网络脚本，可以先下载审阅：
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.3/install.sh
+curl -fsSLO https://raw.githubusercontent.com/AI-Scarlett/DSH_CLIAPI/v0.5.4/install.sh
 less install.sh
 bash install.sh
 ```
@@ -154,7 +154,7 @@ provider 和模型名以你自己的 Harness 面板实际显示为准，不需�
 ./verify.sh
 ```
 
-预期看到 `product: DSH_CLIAPI` 和版本 `0.5.3`。脚本随后通过兼容 HTTP 入口验证 CLIProxyAPI 候选，响应中的 `model` 会标明实际命中的模型。Harness 与 API 模型的混合调度应在 Harness 内使用 `Auto` 验证。
+预期看到 `product: DSH_CLIAPI` 和版本 `0.5.4`。脚本随后通过兼容 HTTP 入口验证 CLIProxyAPI 候选，响应中的 `model` 会标明实际命中的模型。Harness 与 API 模型的混合调度应在 Harness 内使用 `Auto` 验证。
 
 开发时可运行 `node test/auto-failover.mjs`；测试会依次模拟 Harness API 失败、CLIProxyAPI 连接异常，并断言第三个自定义 API provider 接管、参数得到保留且前两个候选进入冷却。
 
